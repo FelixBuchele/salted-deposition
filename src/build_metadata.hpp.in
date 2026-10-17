@@ -1,0 +1,7 @@
+#pragma once
+namespace sdbd::build {
+inline constexpr char compiler[] = "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@";
+inline constexpr char source_sha256[] = "@SDBD_SOURCE_SHA256@";
+inline constexpr char configuration[] = "@CMAKE_BUILD_TYPE@";
+inline constexpr char flags[] = R"salted(@SDBD_RECORDED_FLAGS@)salted";
+}

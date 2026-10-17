@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "salted-deposition"
+version = "0.11.0"
+description = "Optional standard-library interface to the compiled SALTED deposition executable"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Felix Buchele"}]
+dependencies = []
+
+[tool.setuptools]
+packages = ["salted_deposition"]

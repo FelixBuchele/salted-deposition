@@ -1,0 +1,97 @@
+cmake_minimum_required(VERSION 3.20)
+project(SDBD VERSION 0.11.0 LANGUAGES CXX)
+
+# Dependencies must already be installed. Configuration never downloads code.
+find_package(GSL 2.0 REQUIRED)
+include(CheckCXXSymbolExists)
+check_cxx_symbol_exists(feenableexcept "fenv.h" SDBD_HAS_FEENABLEEXCEPT)
+if(NOT SDBD_HAS_FEENABLEEXCEPT)
+    message(FATAL_ERROR "SALTED currently requires feenableexcept (GNU/glibc).")
+endif()
+
+add_library(sdbd_geometry src/particle.cpp src/particle_io.cpp src/generators.cpp src/orientation.cpp)
+target_include_directories(sdbd_geometry PUBLIC include)
+target_compile_features(sdbd_geometry PUBLIC cxx_std_20)
+set_target_properties(sdbd_geometry PROPERTIES CXX_EXTENSIONS OFF)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(sdbd_geometry PRIVATE -fno-fast-math -Wall -Wextra)
+endif()
+
+add_library(sdbd_core
+    src/simulation.cpp src/random.cpp src/io.cpp src/cluster.cpp src/export.cpp
+    src/surround.cpp src/numerics.cpp
+    src/math/periodic.cpp src/math/matrix.cpp src/math/rotation.cpp)
+target_include_directories(sdbd_core PUBLIC include PRIVATE src)
+target_compile_features(sdbd_core PUBLIC cxx_std_20)
+set_target_properties(sdbd_core PROPERTIES CXX_EXTENSIONS OFF)
+target_link_libraries(sdbd_core PUBLIC sdbd_geometry PRIVATE GSL::gsl GSL::gslcblas)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(sdbd_core PRIVATE -fno-fast-math -Wall -Wextra -Wno-sign-compare)
+endif()
+
+option(SDBD_ENABLE_GEMSS "Enable optional bundled GEMSS STL particle generation" OFF)
+set(SDBD_EIGEN_INCLUDE_DIRECTORY "" CACHE PATH "Optional local Eigen header root (contains Eigen/Core)")
+if(SDBD_ENABLE_GEMSS)
+    set(sdbd_gemss_directory "${CMAKE_CURRENT_SOURCE_DIR}/vendor/GEMSS")
+    if(SDBD_EIGEN_INCLUDE_DIRECTORY)
+        if(NOT EXISTS "${SDBD_EIGEN_INCLUDE_DIRECTORY}/Eigen/Core")
+            message(FATAL_ERROR "SDBD_EIGEN_INCLUDE_DIRECTORY must contain Eigen/Core")
+        endif()
+        add_library(sdbd_eigen INTERFACE)
+        target_include_directories(sdbd_eigen SYSTEM INTERFACE "${SDBD_EIGEN_INCLUDE_DIRECTORY}")
+        set(sdbd_eigen_target sdbd_eigen)
+    else()
+        find_package(Eigen3 3.4 REQUIRED NO_MODULE)
+        set(sdbd_eigen_target Eigen3::Eigen)
+    endif()
+    find_package(Threads REQUIRED)
+    add_library(sdbd_gemss src/gemss.cpp)
+    target_include_directories(sdbd_gemss SYSTEM PRIVATE "${sdbd_gemss_directory}"
+        "${sdbd_gemss_directory}/thirdparty")
+    target_link_libraries(sdbd_gemss PUBLIC sdbd_geometry PRIVATE ${sdbd_eigen_target} Threads::Threads)
+    target_compile_definitions(sdbd_gemss PRIVATE EIGEN_MPL2_ONLY)
+    # Deliberately serial OpenMP reductions and no native/fast-math flags.
+    # Optimization applies only to the expensive header-only backend.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(sdbd_gemss PRIVATE -O3 -fno-fast-math)
+    endif()
+    set_target_properties(sdbd_gemss PROPERTIES CXX_EXTENSIONS OFF)
+endif()
+
+add_executable(deposit src/main.cpp src/cli.cpp src/configuration.cpp)
+file(GLOB_RECURSE sdbd_sources CONFIGURE_DEPENDS "src/*.cpp" "src/*.hpp" "include/*.hpp"
+    "vendor/GEMSS/*.h" "vendor/GEMSS/*.hpp" "vendor/GEMSS/*.cpp" "vendor/GEMSS/*.c")
+list(APPEND sdbd_sources "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt" "${CMAKE_CURRENT_SOURCE_DIR}/src/build_metadata.hpp.in")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${sdbd_sources})
+set(sdbd_source_manifest "")
+foreach(source IN LISTS sdbd_sources)
+    file(SHA256 "${source}" checksum)
+    file(RELATIVE_PATH relative "${CMAKE_CURRENT_SOURCE_DIR}" "${source}")
+    string(APPEND sdbd_source_manifest "${relative}:${checksum}\n")
+endforeach()
+string(SHA256 SDBD_SOURCE_SHA256 "${sdbd_source_manifest}")
+string(TOUPPER "${CMAKE_BUILD_TYPE}" sdbd_configuration)
+set(SDBD_RECORDED_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${sdbd_configuration}} -fno-fast-math")
+configure_file(src/build_metadata.hpp.in generated/build_metadata.hpp @ONLY)
+target_include_directories(deposit PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_compile_definitions(deposit PRIVATE SDBD_VERSION="${PROJECT_VERSION}" SDBD_GSL_VERSION="${GSL_VERSION}")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(deposit PRIVATE -fno-fast-math -Wall -Wextra)
+endif()
+if(SDBD_ENABLE_GEMSS)
+    target_compile_definitions(deposit PRIVATE SDBD_CLI_GEMSS)
+    target_link_libraries(deposit PRIVATE sdbd_gemss)
+endif()
+target_link_libraries(deposit PRIVATE sdbd_core)
+set_target_properties(deposit PROPERTIES CXX_EXTENSIONS OFF)
+
+option(BUILD_TESTING "Enable the small CLI and example smoke test" OFF)
+include(CTest)
+if(BUILD_TESTING)
+    add_test(NAME smoke COMMAND "${CMAKE_COMMAND}"
+        "-DDEPOSIT=$<TARGET_FILE:deposit>"
+        "-DEXAMPLES=${CMAKE_CURRENT_SOURCE_DIR}/examples"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/smoke-results"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/smoke.cmake")
+    set_tests_properties(smoke PROPERTIES TIMEOUT 60)
+endif()
