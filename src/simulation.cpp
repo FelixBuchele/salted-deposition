@@ -37,7 +37,8 @@ double angle(const char* text) {
         throw std::invalid_argument("Invalid positive finite phi");
     return value;
 }
-// Restore caller floating-point state on success and exception unwinding.
+// Enable the solver's floating-point error traps for this run and restore
+// the caller's settings on exit, including when an exception is thrown.
 class FloatingEnvironment {
     fenv_t saved_{};
 public:
@@ -167,7 +168,10 @@ int Engine::execute(double requested_phi,int seedgsl,int nspheres,int count,bool
 	std::vector<clustertype> co;
 	co.reserve(N);
 
-	for(int i=0;i<N;i++) //filling up the vector containing clusters, represented with object cp. The particles from this vector will be deposited
+	// Initialize every particle before depositing any: the original program consumes
+	// geometry, placement and orientation draws in this order. Interleaving the two
+	// stages would change all later random draws and therefore the trajectories.
+	for(int i=0;i<N;i++)
 	{
         const auto generated=manual ? std::optional<ParticleGeometry>{} : std::optional<ParticleGeometry>{generate_builtin(
             static_cast<BuiltinShape>(particle),nspheres,[this]{ return ranf(); },h0,particle_scale)};
@@ -192,22 +196,22 @@ int Engine::execute(double requested_phi,int seedgsl,int nspheres,int count,bool
 	}
 
 	surroundtype su;
-	su.init_grid(*this);//initializations of the object containing fixed particles
+	su.init_grid(*this);// Start with an empty deposited assembly.
     std::vector<std::size_t> redrops(particlefile.empty() && recordfile.empty() ? 0 : N,0);
 
-	for(int i=0;i<co.size();i++)//loop in which particles are sedimented 
+	for(int i=0;i<co.size();i++)// Deposit sequentially; accepted particles remain fixed.
 	{
 		if(!runtime_output && i%100==0) ds("i",i);
 		clustertype c=std::move(co[i]);
-		if(!doredrop)//if no redropping leave particle in (rare) unstable positions 
+		if(!doredrop)// Accept the stopped state even if settle reports numerical collapse.
 		{
 			c.settle(su);//sediments the particle (cluster)		
 		}
-		else//if there is a problem redropping of a cluster is allowed
+		else// Retry collapsed attempts with a new placement and orientation.
 		{
 			bool collapsed;
 			clustertype cplr=c;
-			do//loop until the particle reaches a proper stable position (needed very rarely)
+			do// There is no retry limit; difficult configurations may not finish.
 			{
 				collapsed=c.settle(su);//sediments the particle (cluster)		
 				if(collapsed)//choose new random position and orientation
@@ -234,7 +238,7 @@ int Engine::execute(double requested_phi,int seedgsl,int nspheres,int count,bool
                 if (c.r[j].z()+c.R[j]>height_limit)
                     throw std::out_of_range("Deposited particle surface exceeds requested box height");
         }
-		unload(c,su);//the cluster has been sedimented, add it to the fixed particles
+		unload(c,su);// Store the accepted particle as a fixed obstacle for later drops.
         if (progress) progress(i+1,N);
 	}
 
@@ -252,7 +256,7 @@ int Engine::execute(double requested_phi,int seedgsl,int nspheres,int count,bool
         for (const auto& center : su.particle_centers) mean+=center.z();
         packing_center_z=mean/su.particle_centers.size();
     } else packing_center_z=cmass(su.r,su.R).z();
-    if (!cmsfile.empty()) write2cm(packing_center_z,cmsfile_str.c_str());//filling height
+    if (!cmsfile.empty()) write2cm(packing_center_z,cmsfile_str.c_str());// Legacy height estimate: twice the packing COM height, not surface height.
 
 	int intersect=checkinters(su);//check for intersections
 	std::string detailsfile_str=detailsfile+file_identifier;

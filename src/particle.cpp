@@ -13,7 +13,7 @@ using geometry_detail::ValidationEnvironment;
 using geometry_detail::arithmetic_range;
 // Return whether all Cartesian components of p are finite.
 bool finite(Vec3 p) { return std::isfinite(p.x()) && std::isfinite(p.y()) && std::isfinite(p.z()); }
-// Throw invalid_argument with message when a geometry invariant is false.
+// Throw invalid_argument with message if a geometry check fails.
 void require(bool valid, const char* message) {
     if (!valid) throw std::invalid_argument(message);
 }
@@ -38,8 +38,8 @@ ParticleGeometry::ParticleGeometry(std::vector<Sphere> spheres, std::optional<Ve
             const auto radii = spheres_[i].radius+spheres_[j].radius;
             require(std::isfinite(d) && std::isfinite(radii), "Particle distance exceeds numerical range");
             if (d<radii) overlaps_=true;
-            // Exact containment removes no union boundary. Keep the first of
-            // coincident equal spheres; retain all spheres in geometry/output.
+            // A sphere fully inside another adds no collision surface. Keep the first
+            // of identical spheres for contacts, but store and export every sphere.
             if (d+spheres_[i].radius<=spheres_[j].radius) exposed[i]=false;
             else if (d+spheres_[j].radius<=spheres_[i].radius) exposed[j]=false;
         }
@@ -63,8 +63,8 @@ ParticleGeometry::ParticleGeometry(std::vector<Sphere> spheres, std::optional<Ve
         center_=center_+spheres_[0].center;
     }
     update_center_bounds();
-    // Exact union test, not an approximate shape simplification. Keep every
-    // constituent sphere; only select the existing centered-sphere collapse rule.
+    // If a COM-centered sphere contains every other sphere, the collision shape
+    // is exactly spherical. Use the sphere stopping rule without deleting geometry.
     for (const auto& outer : spheres_) {
         if (outer.center.x()!=center_.x() || outer.center.y()!=center_.y() || outer.center.z()!=center_.z()) continue;
         const bool contains_all=std::all_of(spheres_.begin(),spheres_.end(),[&](const Sphere& inner) {
@@ -122,7 +122,8 @@ void ParticleGeometry::validate_properties() const {
         const auto& a=p.inertia_per_density;
         for (auto value:a) require(std::isfinite(value), "Nonfinite inertia tensor");
         require(a[1]==a[3] && a[2]==a[6] && a[5]==a[7], "Inertia tensor must be symmetric");
-        // Sylvester criterion: reject nonphysical/degenerate volumetric tensors.
+        // Inertia must be positive about every axis. Positive leading principal
+        // minors test this (Sylvester's criterion); reject zero-volume degeneracies.
         require(a[0]>0 && a[0]*a[4]-a[1]*a[1]>0 &&
                 a[0]*(a[4]*a[8]-a[5]*a[7])-a[1]*(a[3]*a[8]-a[5]*a[6])+a[2]*(a[3]*a[7]-a[4]*a[6])>0,
                 "Inertia tensor must be positive definite");

@@ -1,10 +1,13 @@
 # Final deposition exports
 
-Exports use only C++20/standard-library streams. The existing
-GSL dependency is unchanged; neither VTK nor ParaView is linked into SALTED.
-Every normal run writes sphere VTK, and prepared STL runs additionally write
-poses when retained source frames are available. Set `stl_poses = false` for
-collision-only output. The saved run record retains that choice. For example:
+Export files describe the final packing for visualization or further analysis.
+A viewer draws a sphere at each point in `deposition.vtk`, or places the original
+STL at each point in `stl_poses.vtk` using the recorded rotation and scale.
+ParaView is one compatible viewer; it is not a SALTED dependency.
+
+Every normal run writes the sphere file. STL-derived particles also produce poses
+when the original mesh reference and coordinate frame are available. Set
+`stl_poses = false` to omit poses. For example:
 
 ```sh
 build/deposit run examples/rock/config.conf
@@ -34,10 +37,9 @@ final stored world coordinates, including its horizontal periodic wrapping.
 
 All arrays use a `FIELD PointAttributes` block following `POINT_DATA`. This avoids
 legacy readers silently loading only the first scalar array. Decimal coordinates,
-radii and poses use `long double::max_digits10`; VTK's portable numeric type is
-`double`. Text preserves solver digits, but ParaView reads binary64 and its GPU
-instance transforms can use binary32. A rendered view is not a long-double
-numerical verification.
+radii and poses are written with enough decimal digits to recover the solver's
+long-double values. The VTK type is `double`, so a viewer may read or render them
+at lower precision.
 
 In ParaView, open `deposition.vtk`, apply the reader and select **3D Glyphs** as
 the representation (not the Glyph filter). In advanced display properties choose
@@ -51,8 +53,9 @@ No triangulated sphere surfaces are stored in the file.
 
 `stl_poses.vtk` contains one point/vertex per accepted rigid particle. Its point
 arrays are `particle_id`, `orientation` (four-component unit quaternion, **WXYZ**)
-and `scale` (one positive uniform factor). Quaternion rotations are right-handed,
-active, and applied to original STL coordinates. Updates compose on the left:
+and `scale` (one positive uniform factor). A quaternion is four numbers describing
+a three-dimensional rotation; W is the scalar component, followed by X, Y and Z.
+Rotations are right-handed and act on the original STL coordinates. Updates compose on the left:
 the latest world rotation acts after the previous orientation. Quaternion signs
 are immaterial; no orientation fitting from deposited spheres is performed.
 
@@ -89,7 +92,7 @@ mapper scales rotation-matrix columns before adding point translation. See the
 [representation definition](https://github.com/Kitware/ParaView/blob/v6.0.1/Remoting/Views/Resources/views_and_representations.xml)
 and [VTK mapper implementation](https://github.com/Kitware/VTK/blob/v9.5.2/Rendering/OpenGL2/vtkOpenGLGlyph3DMapper.cxx).
 
-## Source provenance and limitations
+## Original mesh reference and limitations
 
 New STL-generated particle snapshots use `SDBD_MULTISPHERE 3`, extending version 2
 with `source_stl`, `source_origin` and `source_orientation_wxyz`. File I/O preserves
@@ -100,9 +103,8 @@ requires regeneration from the original STL. A missing or checksum-mismatched
 source is rejected; no mesh location or orientation is guessed. Collision-only
 replay does not require the original STL to remain present.
 
-The current engine repeats one geometry per run; each pose dataset consequently
-references one original STL. There is no mixed-geometry simulation mode or mesh
-registry. Separate geometries/runs have separate output directories/datasets.
+One run repeats one particle geometry, so each pose file belongs to one original
+STL. Use separate simulations and output directories for different particle shapes.
 
 STL instances remain continuous rigid bodies across a periodic boundary, whereas
 constituent coordinates in `deposition.vtk` are individually wrapped. Equivalent

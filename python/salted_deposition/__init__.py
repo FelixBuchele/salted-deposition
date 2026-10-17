@@ -1,4 +1,4 @@
-"""Optional subprocess interface to SALTED; numerical work stays in C++."""
+"""Run the compiled SALTED program from Python; all numerical work stays in C++."""
 
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -13,7 +13,10 @@ __all__ = ["Simulator", "SimulationResult"]
 
 @dataclass(frozen=True)
 class SimulationResult:
-    """Completed output directory and existing exports; absent STL poses are None."""
+    """Paths from a completed run: its output directory, sphere VTK and optional STL poses.
+
+    Paths are absolute. stl_poses_path is None when no pose file was produced.
+    """
 
     output_dir: Path
     vtk_path: Path | None
@@ -36,13 +39,19 @@ def _required_file(path: Path) -> Path:
 
 
 class Simulator:
-    """Invoke an already compiled SALTED executable; never build or install it."""
+    """Run an existing SALTED executable without building or installing it.
+
+    C++ handles configuration and scientific calculations. Failed commands raise
+    subprocess.CalledProcessError, with diagnostics shown in the terminal.
+    Existing outputs are refused by SALTED; missing output files raise
+    FileNotFoundError.
+    """
 
     def __init__(self, executable: str | Path = "deposit") -> None:
-        """Find an existing executable path or PATH entry; raise FileNotFoundError.
+        """Find executable by path or on PATH; raise FileNotFoundError if absent.
 
-        Relative executable paths are anchored to the caller's current directory
-        at construction. Python and SALTED must run in the same environment.
+        Relative executable paths use the current directory at construction.
+        Python and SALTED must run in the same environment.
         """
         name = os.fspath(executable)
         if isinstance(executable, Path) or os.path.dirname(name):
@@ -60,7 +69,10 @@ class Simulator:
         self, operation: str, config: Path | None, output: Path,
         overrides: dict[str, object],
     ) -> None:
-        """Run once with a small temporary overlay, parsed exclusively by C++."""
+        """Run one command, writing only overrides to a temporary C++ configuration.
+
+        C++ combines these values with config; Python does not parse that file.
+        """
         command = [self._executable, operation]
         if config is not None:
             command.append(str(config))
@@ -85,15 +97,16 @@ class Simulator:
         shape: str | None = None, particle: str | Path | None = None,
         export_stl_poses: bool | None = None,
     ) -> SimulationResult:
-        """Run a configuration with selected overrides and return verified exports.
+        """Run config in output and return the paths of the generated exports.
 
-        None preserves config values. Shape and particle are mutually exclusive;
-        shapes are sphere/spiky/cube/stick. Configuration-relative paths stay in
-        C++; method paths use the caller's current directory. VTK is always written.
-        STL poses follow config unless explicitly enabled/disabled. C++ diagnostics
-        stream to stdout/stderr; nonzero exits raise subprocess.CalledProcessError.
-        Missing required exports raise FileNotFoundError; invalid API choices raise
-        ValueError/TypeError. Existing outputs are refused by C++, not overwritten.
+        count and seed override the file only when supplied. Choose either a
+        built-in shape (sphere/spiky/cube/stick) or a particle file; None keeps
+        the configuration value. Conflicting choices raise ValueError.
+
+        VTK is always written. export_stl_poses follows config when None; True
+        requires a pose file or raises FileNotFoundError. The flag must be bool
+        or None. Method paths use the current directory; paths inside config
+        remain relative to that file. Execution errors propagate as in Simulator.
         """
         if shape is not None and particle is not None:
             raise ValueError("Specify shape or particle, not both")
@@ -125,15 +138,16 @@ class Simulator:
         max_spheres: int | None = None, units: str | None = None,
         config: str | Path | None = None,
     ) -> Path:
-        """Generate through GEMSS and return the verified reusable particle path.
+        """Generate a reusable particle file from STL through GEMSS; return its path.
 
-        Supply explicit units (mm/cm/m/legacy), or a generation config declaring
-        them; advanced settings stay in that C++ config. None preserves its values
-        or C++ defaults. All method paths use the caller's current directory.
-        C++ preserves target-derived physical properties. Disabled GEMSS, invalid
-        inputs and existing outputs raise subprocess.CalledProcessError, with live
-        C++ diagnostics. Missing output raises FileNotFoundError; omitted units
-        without config raises ValueError. No mesh data is read by Python.
+        Declare mesh units (mm/cm/m/legacy), or supply a generation config that
+        declares them; omitting both raises ValueError. max_spheres limits the
+        sphere count. Advanced settings stay in config; None keeps its values
+        or C++ defaults. Method paths use the current directory.
+
+        C++ calculates physical properties from the target mesh and handles all
+        geometry processing. Disabled GEMSS, invalid inputs and file errors
+        propagate as described in Simulator.
         """
         if config is None and units is None:
             raise ValueError("Declare units or supply a generation config with units")

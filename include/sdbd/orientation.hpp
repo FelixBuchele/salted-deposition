@@ -3,7 +3,9 @@
 #include <array>
 
 namespace sdbd {
-// Unit right-handed active rotation, scalar-first WXYZ; independent export bookkeeping.
+// Unit quaternion in scalar-first order (w,x,y,z), using right-handed rotations.
+// It rotates vectors in fixed axes. The solver tracks it for export, but continues
+// to calculate motion with its original rotation formulas.
 struct Quaternion {
     long double w{1},x{},y{},z{};
     // Return a unit quaternion or throw for nonfinite/zero norm.
@@ -16,7 +18,7 @@ struct Quaternion {
     friend Quaternion operator*(const Quaternion& a,const Quaternion& b);
     // Convert orthonormal rotation columns into a normalized WXYZ quaternion.
     static Quaternion from_basis(const std::array<Vec3,3>& columns);
-    // Convert a unit-axis rotation's sine/cosine into a normalized quaternion.
+    // Convert an axis and angle cosine/sine into a unit quaternion; normalize the axis.
     static Quaternion from_axis(Vec3 axis,long double cosine,long double sine);
 };
 }

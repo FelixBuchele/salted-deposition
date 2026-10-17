@@ -55,20 +55,22 @@ bool clustertype::settle(surroundtype& su)
 		countev++;
 		vtype cmp=cm;
 
-		switch(contacts)//propagates cluster by one event
+		switch(contacts)// Advance to the next contact or stopping event.
 		{
-			case 0: fall(su);break;//propagate when cluster is falling
-			case 1: rotate1(su);break;//propagate when cluster is rotating on one contact
-			case 2: rotate2(su);break;//propagate when cluster is rotating on two contacts
+			case 0: fall(su);break;// No supports: vertical fall.
+			case 1: rotate1(su);break;// One support: rotate about its horizontal descent axis.
+			case 2: rotate2(su);break;// Two supports: rotate about the axis through their centers.
 		}
 
 		long double dcm1=norm(cm-cmp);
 
 		long double eps_collapse=60*1e-10;
 		long double eps_contact=60*1e-8;
-		if(dcm1<eps_collapse&&engine_->particle!=0)//for spheres no need to detect collapse 
+		// A centered sphere uses the original sphere stopping rule.
+		if(dcm1<eps_collapse&&engine_->particle!=0)
 		{
-			//collapse detected, going through collapse
+			// Successive events move COM by less than eps_collapse. Rebuild the
+			// nearby contact set to look for a continuing descent path.
 
 			std::vector<vtype> rps;
 			std::vector<vtype> rds;
@@ -76,8 +78,8 @@ bool clustertype::settle(surroundtype& su)
 			std::vector<int> d;
 			engine_->find_cluster_contacts(eps_contact,*this,su,rps,rds,p,d);//finds contacts by proximity
 
-			// Repeated fixed-sphere supports do not define distinct rotation axes.
-            // Preserve the supplied implementation's collapse/redrop criterion.
+			// Two contacts with the same fixed sphere do not define a two-support axis.
+            // In this case, stop the attempt and let the caller decide whether to redrop.
 			bool duplicate_exists=false;
 			for(std::size_t i=0;i+1<p.size();i++)
 			for(int j=i+1;j<p.size();j++)
@@ -87,7 +89,7 @@ bool clustertype::settle(surroundtype& su)
 			{
 				rotattempt att;
 				find_steepest_descent(rps,rds,p,d,cm,att);//find steepest descent with closed contacts considered
-				//update state
+				// Change the contact state without moving the particle.
 				contacts=att.contacts;
 				stable=att.stable;
 				p1=att.p1;
@@ -99,18 +101,18 @@ bool clustertype::settle(surroundtype& su)
 				td=att.td;
 				tp=att.tp;
 				f=att.f;
-				//particle stays where it is so no need to change cm and r[i]
+
 			}
 			else
 			{
 				// Repeated fixed support: leave retry/freeze policy to the caller.
 				stable=true;
-				collapsed=true;//considered as collapsed, in order to be redropped, if chosen
+				collapsed=true;// Signal numerical collapse to the caller.
 			}
 
 		}
 
-		if(countev%1000000==0)//parabolic collapse fixing
+		if(countev%1000000==0)// Detect very slow progress over a million contact events.
 		{
 			if(norm(cmev-cm)<60) 
 			{
@@ -121,7 +123,7 @@ bool clustertype::settle(surroundtype& su)
 			else cmev=cm;
 		}
 
-		/*****************  Important: periodic boundary conditions treatment  *****************/
+		// Wrap the whole particle horizontally, preserving its shape and physical COM.
 		periodic(engine_->lx,engine_->ly);
 	}
 	return collapsed;
@@ -154,11 +156,12 @@ void clustertype::fall(surroundtype& su)
 {
 	std::vector<fallattempt> atvec;fallattempt att;
 
-	bfall(su,atvec);//add events for collisions with fixed spheres
-	gfall(atvec);//add events for collisions with the ground
+	bfall(su,atvec);
+	gfall(atvec);
 
 	if(atvec.size()==0) {throw std::runtime_error("fall: no events");}//must be at least one future event
-	att=*std::max_element(atvec.begin(),atvec.end());//choose the highest future event
+	// The highest candidate COM is reached first during descent.
+	att=*std::max_element(atvec.begin(),atvec.end());
 
 	step0(att,su);//move the cluster
 }
@@ -168,12 +171,12 @@ void clustertype::bfall(surroundtype& su,std::vector<fallattempt>& atvec)
 	int j,k;long double dlt;fallattempt att;
 	bool contact;long double zfc;
 	vtype rp;
-	for(k=0;k<r.size();k++)//looop through all cluster particles
+	for(k=0;k<r.size();k++)// Test each exposed sphere of the moving particle.
 	{
         if (!collision_active(k)) continue;
 		zfc=engine_->h0;contact=false;
 		int ixl,ixr,iyl,iyr,izu;engine_->findindex(r[k],R[k],ixl,ixr,iyl,iyr,izu);
-		for(int it=ixl;it<=ixr;it++)//loop through boxes containing candidates
+		for(int it=ixl;it<=ixr;it++)// Search columns that can contain a supporting sphere.
 		for(int nt=iyl;nt<=iyr;nt++)
 		{
 			int i=imod(it,engine_->nx);
@@ -184,9 +187,9 @@ void clustertype::bfall(surroundtype& su,std::vector<fallattempt>& atvec)
 				j=su.box[i][n][m][s];
                 if (!su.collision_active[j]) continue;
 				rp=vmod(su.r[j],cm,engine_->lx,engine_->ly);
-				if(k!=td||j!=tp)//to avoid recontact when conacts was lost by rolling to horizontal
+				if(k!=td||j!=tp)// Exclude the pair whose contact was just lost at equal center heights.
 				if(engine_->pcontact0(r[k],R[k],rp,su.R[j],dlt)) //test for collision by translation 
-				if(r[k].z()-dlt>rp.z())//gradient check
+				if(r[k].z()-dlt>rp.z())// Keep contact on the upper side of the fixed sphere.
 				{
 					if(dlt>0&&!contact) {contact=true;zfc=r[k].z()-dlt;}
 					if(dlt>0&&r[k].z()-dlt>zfc) zfc=r[k].z()-dlt;
@@ -262,7 +265,9 @@ void clustertype::translate(long double dlt,int d1,int p1,surroundtype& su)
 
 	if(p1>=0&&d1>=0)
 	{
-		//correction due to loss of precision due to use of dlt
+		// Falling from h0 can lose precision through subtraction. Correct the
+		// contacting sphere's height to restore tangency; this original per-sphere
+		// correction can produce a small deviation from exact rigid geometry.
 		vtype rp1=su.r[p1];
 		vtype rd1l=vmod(r[d1],rp1,engine_->lx,engine_->ly);
 
@@ -283,14 +288,14 @@ void clustertype::rotate1(surroundtype& su)
 	std::vector<rotattempt> atvec;rotattempt att;
 	vtype rp_temp=vmod(su.r[p1],cm,engine_->lx,engine_->ly);
 
-	//correction of the case where the center of mass is above the center of fixed particle
+	// If COM is directly above the support center, the descent axis is undefined.
 	bool cm_on_top_of_fixed_particle=std::fabs(cm.x()-rp_temp.x())<60*1e-6&&std::fabs(cm.y()-rp_temp.y())<60*1e-6;
 	vtype sh;
 
-	if(cm_on_top_of_fixed_particle)//moves p1 particle slightly
+	if(cm_on_top_of_fixed_particle)// Temporarily shift the support to choose an axis; restore it below.
 	{	
-        // Two uniform horizontal draws reproduce the supplied code's square
-        // perturbation; its contradictory rejection predicate never repeated.
+        // Sample x and y independently in [-eps,eps). Keep both draws and the
+        // square sampling region to preserve the original random sequence.
         sh.z()=0;
         sh.x()=engine_->ranfs();
         sh.y()=engine_->ranfs();
@@ -302,10 +307,10 @@ void clustertype::rotate1(surroundtype& su)
 	vtype rp=vmod(su.r[p1],cm,engine_->lx,engine_->ly);
 
 	steeperdphi(rp,atvec);//dphi event
-	brot1(su,atvec);//add events for collisions with fixed spheres
-	hrot(rp,atvec);//add event for rotation to horizontal 
-	bottomrot1(rp,atvec);//add event for rotation to hanging
-	grot1(rp,atvec);//add event for contact with the ground
+	brot1(su,atvec);
+	hrot(rp,atvec);
+	bottomrot1(rp,atvec);
+	grot1(rp,atvec);
 	if(atvec.size()==0) {throw std::runtime_error("rotate1: no events");}
 
 	att=*std::max_element(atvec.begin(),atvec.end());
@@ -316,19 +321,20 @@ void clustertype::rotate1(surroundtype& su)
 
 void clustertype::steeperdphi(const vtype& rp,std::vector<rotattempt>& atvec)
 {
-	if(r[d1].z()<rp.z())//if cluster particle is below fixed one then cluster is frustrated situation
+	if(r[d1].z()<rp.z())// A contact below the support needs the small-angle release test.
 	{		
 		rotinftype rotinf=engine_->rotinfphi;
 		vtype cmr=cm-rp;
 		vtype n=v(ez,cmr);n=(1/norm(n))*n;
 		rotinf.n=n;
-		
+
 		vtype cmc=rot(cm,rp,rotinf.cc,rotinf.ss,rotinf.n);//rotated center of mass
 		vtype rdr=rot(r[d1],rp,rotinf.cc,rotinf.ss,rotinf.n);//rotated cluster particle d1
 
-		if(engine_->rightside(cm-rp,cmc-rp,rotinf.n))//checks whether the cluster is on the same side of the plane with normal ez x n, please see paper
+		// Keep COM on the same side of the vertical plane through the rotation axis.
+		if(engine_->rightside(cm-rp,cmc-rp,rotinf.n))
 		{
-			if(rdr.z()<rp.z())//check whether after rotation by dphi angle cluster sphere is still below fixed sphere
+			if(rdr.z()<rp.z())// Contact must still lie below the support after the phi step.
 			{
 				rotattempt att;
 				att.contacts=0;
@@ -358,10 +364,10 @@ void clustertype::brot1(surroundtype& su,std::vector<rotattempt>& atvec)
 	int j;
 	vtype rp=vmod(su.r[p1],cm,engine_->lx,engine_->ly);
 
-//find
+	// Choose an angular increment for overlapping search volumes along the path.
 	long double rmax=0;
 	long double lmax=0;
-	for(int k=0;k<r.size();k++)//find the rotation angle between test positions of the cluster such that no events are missed
+	for(int k=0;k<r.size();k++)
 	{
         if (!collision_active(k)) continue;
 		long double rt=engine_->distance_from_axis(r[k],rp,cm);
@@ -378,18 +384,18 @@ void clustertype::brot1(surroundtype& su,std::vector<rotattempt>& atvec)
 
 	long double phic=0;
 	long double phidet=engine_->l_pi;
-	do//do while loop until first contact has been detected without doubt
+	do// Search until the covered arc reaches the earliest contact found.
 	{
-		for(int k=0;k<r.size();k++)//loop through cluster particles
+		for(int k=0;k<r.size();k++)
 		{
         if (!collision_active(k)) continue;
-			vtype point=engine_->rotpoint(r[k],rp,cm,phic);//position of the cluster particle according to current test angle
+			vtype point=engine_->rotpoint(r[k],rp,cm,phic);// Sphere center at the trial rotation angle.
 			long double axisr=engine_->distance_from_axis(r[k],rp,cm);
 			long double l=2*axisr*std::sin(dephi/2);
 			long double max_cillinder=R[k]+engine_->Rmax+axisr-std::sqrt(axisr*axisr-l*l/4.);
 			long double radius=std::sqrt(l*l/4.+max_cillinder*max_cillinder);//radius of the search volume
 
-			vtype rref=point;//center of spheres giving the neighbours
+			vtype rref=point;// Center of the neighbor-search volume.
 
 			//testing collision with candidate spheres 
 			int ixl=std::floor((rref.x()-radius-engine_->xo)/engine_->dx);
@@ -412,12 +418,13 @@ void clustertype::brot1(surroundtype& su,std::vector<rotattempt>& atvec)
 				for(int jj=0;jj<su.box[ixn][iyn][izn].size();jj++)
 				{
 					j=su.box[ixn][iyn][izn][jj];
-                    if (!su.collision_active[j]) continue; // index of the candidate sphere
+                    if (!su.collision_active[j]) continue; // A contained sphere adds no contact surface.
 					vtype rp2=vmod(su.r[j],cm,engine_->lx,engine_->ly);//periodic conditions applied to candidate sphere
 					{
-						rotinftype rotinf1,rotinf2,rotinf;//information about rotation
+						rotinftype rotinf1,rotinf2,rotinf;
 						if(j!=p1)//no need to test for contact 1
-						if(!f||k!=td||j!=tp)//to avoid reconctact after grazing loss of contact
+						// Exclude immediate recontact with the just-released grazing pair.
+						if(!f||k!=td||j!=tp)
 						if(engine_->pcontact1(rp,cm,r[k],R[k],rp2,su.R[j],rotinf1,rotinf2))//test for collision
 						{
 							const std::array rotv{rotinf1,rotinf2};
@@ -427,11 +434,12 @@ void clustertype::brot1(surroundtype& su,std::vector<rotattempt>& atvec)
 							{
 								rotinf=rotv[ir];
 
-								//rotated relevant quantities
+
 								vtype cmc=rot(cm,rp,rotinf.cc,rotinf.ss,rotinf.n);
 								vtype rdc=rot(r[d1],rp,rotinf.cc,rotinf.ss,rotinf.n);
 								vtype rcc=rot(r[k],rp,rotinf.cc,rotinf.ss,rotinf.n);
-								if(engine_->rightside(cm-rp,cmc-rp,rotinf.n)&&engine_->g(rp,cmc,rcc,rp2)<0&&cmc.z()<cm.z()+engine_->epsz)//final check if collision is a valid future event
+								// Require the correct side, an approaching contact and no upward COM motion.
+								if(engine_->rightside(cm-rp,cmc-rp,rotinf.n)&&engine_->g(rp,cmc,rcc,rp2)<0&&cmc.z()<cm.z()+engine_->epsz)
 								{
 									std::vector<vtype> rps;
 									rps.push_back(rp);rps.push_back(rp2);
@@ -443,15 +451,16 @@ void clustertype::brot1(surroundtype& su,std::vector<rotattempt>& atvec)
 									d.push_back(d1);d.push_back(k);
 									find_steepest_descent(rps,rds,p,d,cmc,att);//consider all contacts and find steepest descent trajectory
 									att.rotinf=rotinf; 
-									atvec.push_back(att);//add event
+									atvec.push_back(att);
 
-									//if by numerical error |cos|>1
+									// Move a slightly out-of-range cosine toward [-1,1] before acos.
 									if(att.rotinf.cc<-1) att.rotinf.cc=att.rotinf.cc+1e-12;
 									if(att.rotinf.cc>1) att.rotinf.cc=att.rotinf.cc-1e-12;
 									long double phidetc=std::acos(att.rotinf.cc);//rotation angle for the current collision
-									if(phidetc<phidet) phidet=phidetc;//update smallest colision angle
-								}//right side if
-							}//+- solution for loop
+									// Retain the earliest contact angle found.
+									if(phidetc<phidet) phidet=phidetc;
+								}
+							}
 						}
 					}
 				}
@@ -459,7 +468,7 @@ void clustertype::brot1(surroundtype& su,std::vector<rotattempt>& atvec)
 		}
 		phic+=dephi;//increase the angle for the cluster test position
 	}
-	while((phic-dephi)<phidet);//checks whether the current test angle is too large compared to current collision angle, for earlier collision to be possible  
+	while((phic-dephi)<phidet);// Stop once no unsearched part of the arc can contain an earlier contact.
 }
 
 void clustertype::hrot(const vtype& rp,std::vector<rotattempt>& atvec)
@@ -596,22 +605,23 @@ void clustertype::rotate2(surroundtype& su)
 		}
 		while(std::fabs(sh_val)<0.5);	
 		sh=60*1e-9*sh_val*vcmn;
-		su.r[p1]=su.r[p1]+sh;//moves fixed particle by small amount when cm is exactly on top of rotation axis
+		su.r[p1]=su.r[p1]+sh;// Temporarily break the nearly balanced COM alignment; restore below.
 	}
 	int p1old=p1;
 
 	vtype rp1=vmod(su.r[p1],cm,engine_->lx,engine_->ly);
 	vtype rp2=vmod(su.r[p2],cm,engine_->lx,engine_->ly);
-	brot2(su,atvec);//add events for collisions with fixed spheres
-	disconnect(rp1,rp2,atvec,su);//add events for the case Fig6a of the paper
-	steeperdphi2(rp1,rp2,atvec);//add event for "frustrated" situation
-	hrot2(rp1,rp2,atvec);//add events for the case Fig6b of the paper
-	bottomrot2(rp1,rp2,atvec);//add events for the case Fig6c of the paper
-	grot2(rp1,rp2,atvec);//add events for contact with the ground
+	brot2(su,atvec);
+	disconnect(rp1,rp2,atvec,su);
+	steeperdphi2(rp1,rp2,atvec);
+	hrot2(rp1,rp2,atvec);
+	bottomrot2(rp1,rp2,atvec);
+	grot2(rp1,rp2,atvec);
 
 	if(atvec.size()==0) {throw std::runtime_error("rotate2: no events");}
 
-	att=*std::max_element(atvec.begin(),atvec.end());//choose earliest event
+	// Highest future COM corresponds to the first event during descent.
+	att=*std::max_element(atvec.begin(),atvec.end());
 	step2(att,su,rp1);//propagate cluster by chosen event
 
 	if(is_middle) su.r[p1old]=su.r[p1old]-sh;
@@ -619,7 +629,7 @@ void clustertype::rotate2(surroundtype& su)
 
 void clustertype::steeperdphi2(const vtype& rp1,const vtype& rp2,std::vector<rotattempt>& atvec)
 {
-	//it is guarantied that rp1 corresponds to p1 and rp2 to p2, see function rotate2()
+	// The support positions rp1,rp2 match indices p1,p2, as supplied by rotate2.
 	std::vector<vtype> rp;rp.push_back(rp1);rp.push_back(rp2);
 	std::vector<vtype> rd;rd.push_back(r[d1]);rd.push_back(r[d2]);
 	std::vector<int> p;p.push_back(p1);p.push_back(p2);
@@ -628,7 +638,7 @@ void clustertype::steeperdphi2(const vtype& rp1,const vtype& rp2,std::vector<rot
 	rotattempt att;
 	find_steepest_descent(rp,rd,p,d,cm,att);//find steepest descent trajectory
 
-	if(att.contacts<contacts)//is it possible to move with less contacts?
+	if(att.contacts<contacts)// A steeper path would release at least one contact.
 	{
 		[[maybe_unused]] vtype cmr=cm-rp1;vtype n=rp2-rp1;n=(1/norm(n))*n;
 		if(s(ez,v(n,cm-rp1))>0) n=-1*n;
@@ -646,14 +656,14 @@ void clustertype::steeperdphi2(const vtype& rp1,const vtype& rp2,std::vector<rot
 			vtype rd1r=rot(r[d1],rp1,rotinf.cc,rotinf.ss,rotinf.n);
 			vtype rd2r=rot(r[d2],rp1,rotinf.cc,rotinf.ss,rotinf.n);
 			std::vector<vtype> rd;rd.push_back(rd1r);rd.push_back(rd2r);
-			
+
 			//indices of contacting particles
 			std::vector<int> p;p.push_back(p1);p.push_back(p2);
 			std::vector<int> d;d.push_back(d1);d.push_back(d2);
 
 			rotattempt att;
 			find_steepest_descent(rp,rd,p,d,cmc,att);//find steepest descent after the cluster has been rotated
-			
+
 			if(att.contacts<contacts) 
 			{
 				att.rotinf=rotinf;
@@ -716,7 +726,7 @@ void clustertype::brot2(surroundtype& su,std::vector<rotattempt>& atvec)
 			long double max_cillinder=R[k]+engine_->Rmax+axisr-std::sqrt(axisr*axisr-l*l/4.);
 			long double radius=std::sqrt(l*l/4.+max_cillinder*max_cillinder);
 
-			vtype rref=point; //center of spheres giving the neighbours
+			vtype rref=point; // Center of the neighbor-search volume.
 			int ixl=std::floor((rref.x()-radius-engine_->xo)/engine_->dx);
 			int ixu=std::floor((rref.x()+radius-engine_->xo)/engine_->dx);
 
@@ -743,8 +753,8 @@ void clustertype::brot2(surroundtype& su,std::vector<rotattempt>& atvec)
 					{
 						if(engine_->pcontact2(rp,rp2,cm,r[k],R[k],rp3,su.R[j],rotinf1,rotinf2))
 						{
-//							vector<gradrotattempt> gradevent;
-//							gradevent.clear();
+
+
 
 							const std::array rotv{rotinf1,rotinf2};
 
@@ -773,8 +783,8 @@ void clustertype::brot2(surroundtype& su,std::vector<rotattempt>& atvec)
 	if(att.rotinf.cc>1) att.rotinf.cc=att.rotinf.cc-1e-12;
 									long double phidetc=std::acos(att.rotinf.cc);
 									if(phidetc<phidet) phidet=phidetc;
-								}//right side if
-							}//soulution for loop
+								}
+							}
 						}
 					}
 				}
@@ -791,7 +801,7 @@ void clustertype::bottomrot2(const vtype& rp1,const vtype& rp2,std::vector<rotat
 	rotinftype rotinf;
 	engine_->tobelow2(cm,rp1,rp2,rotinf);
 	vtype cmc=rot(cm,rp1,rotinf.cc,rotinf.ss,rotinf.n);
-	att.contacts=20;//cluster is stable so this value is irrelevant. Value 20 signals that cluster hangs
+	att.contacts=20;// Sentinel for a stopped, hanging particle; no further events are taken.
 	att.stable=true;
 	att.p1=p1;
 	att.d1=d1;
@@ -939,9 +949,10 @@ void clustertype::disconnect(const vtype& rp1,const vtype& rp2, std::vector<rota
 	vtype rd1=r[d1];
 	vtype rd2=r[d2];
 
-	//treatment of contact 2 
+	// Test release of contact 2 while retaining contact 1.
 	bool push12=engine_->g(rp1,cm,rd2,rp2)<0;//is contact 2 closing while rolling just on contact 1?
-	if(push12&&engine_->pdisconnect(cm,rp1,rp2,rd1,rd2,rotinf1,rotinf2))//if so find position of the cluster where d2 moves tangentially to p2, while rotation is on p1 (see paper Eq. 25)
+	// Find grazing positions where contact 2 may open (paper Eq. 25).
+	if(push12&&engine_->pdisconnect(cm,rp1,rp2,rd1,rd2,rotinf1,rotinf2))
 	{
 		//starting solution 1
 		vtype cmc1=rot(cm,rp1,rotinf1.cc,rotinf1.ss,rotinf1.n);
@@ -949,7 +960,7 @@ void clustertype::disconnect(const vtype& rp1,const vtype& rp2, std::vector<rota
 		{
 			if(positivecircle(rp1,rp2,rd2,rotinf1))//checking the condition (31) of the paper
 			{
-				//condition (31) not satisfied. Standard treatment.
+				// The geometric sign test permits release at this grazing position.
 				att.contacts=1;
 				att.stable=false;
 				att.p1=p1;
@@ -967,7 +978,7 @@ void clustertype::disconnect(const vtype& rp1,const vtype& rp2, std::vector<rota
 			}
 			else
 			{
-				//condition (31) satisfied. Cluster needs to be rotated by dphi before contact can be lost
+				// Otherwise try a further phi rotation and confirm that contact 2 opens.
 				engine_->rotinfphi.n=rotinf1.n;
 				rotinftype rotinfdphi=rotn(rotinf1,engine_->rotinfphi);
 				vtype cmcdph=rot(cm,rp1,rotinfdphi.cc,rotinfdphi.ss,rotinfdphi.n);
@@ -1040,9 +1051,9 @@ void clustertype::disconnect(const vtype& rp1,const vtype& rp2, std::vector<rota
 		}
 	}
 
-	//end of treatment of contact2
 
-	//treatment of contact 1
+
+	// Repeat the release test with the two contacts exchanged.
 	bool push21=engine_->g(rp2,cm,rd1,rp1)<0;
 	if(push21&&engine_->pdisconnect(cm,rp2,rp1,rd2,rd1,rotinf1,rotinf2))
 	{
@@ -1190,7 +1201,8 @@ void clustertype::find_steepest_descent(std::span<const vtype> rp,std::span<cons
 	SDBD_REQUIRE(p.size()==d.size());
 	SDBD_REQUIRE(rp.size()==p.size());
 	int contact_number=rp.size();
-	//Add event for cluster falling, if allowed
+	// Downward motion opens every contact only if each moving center is below
+	// its support. In that case free fall has unit vertical gradient -1.
 	bool can_fall=true;
 	for(int i=0;i<contact_number;i++) {can_fall=can_fall&&rd[i].z()<rp[i].z();}
 	if(can_fall) 
@@ -1211,7 +1223,7 @@ void clustertype::find_steepest_descent(std::span<const vtype> rp,std::span<cons
 		gradevent.push_back(gatt);
 	}
 
-	//Add trajectories for rolling on one contact, if they exist 
+	// Keep a one-support rotation only if all other contacts open.
 	for(int i=0;i<contact_number;i++)
 	{
 		bool can_rotate=true;
@@ -1240,7 +1252,7 @@ void clustertype::find_steepest_descent(std::span<const vtype> rp,std::span<cons
 
 	}
 
-	//Add trajectories for rolling on two contacts, if they exist
+	// Likewise, test every pair of supports against all remaining contacts.
 	for(int i=1;i<contact_number;i++)
 	for(int j=0;j<i;j++)
 	{
@@ -1265,7 +1277,7 @@ void clustertype::find_steepest_descent(std::span<const vtype> rp,std::span<cons
 		}
 	}
 
-	if(!gradevent.empty())//if there are trajectories find the steepest
+	if(!gradevent.empty())// Most negative gz gives the greatest COM height loss per unit path length.
 	{
 		gatt=gradevent[0];
 		for(int ig=0;ig<gradevent.size();ig++)
@@ -1285,7 +1297,7 @@ void clustertype::find_steepest_descent(std::span<const vtype> rp,std::span<cons
 		att.f=gatt.f;
 		att.cm=gatt.cm;
 	}
-	else//if there are no trajectories cluster is stable
+	else// No allowed descent direction remains under the current contact tests.
 	{
 		att.contacts=rp.size();
 		att.stable=true;
@@ -1304,7 +1316,8 @@ void clustertype::find_steepest_descent(std::span<const vtype> rp,std::span<cons
 
 void clustertype::randrot()
 {
-	//random basis way
+	// Build an orthonormal basis from two random trial vectors, then rotate
+	// the body about its physical COM. Keep the rejection rules and draw order.
 
 	vtype nxp;//first vector
 	do
@@ -1325,10 +1338,10 @@ void clustertype::randrot()
 	}
 	while(norm(nyp)>1||norm(nyp)<0.5||std::fabs(s(nyp,nxp))<0.1);
 
-	nyp=nyp-nxp*s(nyp,nxp);//nyp is now normal to nxp
+	nyp=nyp-nxp*s(nyp,nxp);// Remove the component along nxp before normalization.
 	nyp=(1/norm(nyp))*nyp;
 
-	vtype nzp=v(nxp,nyp);//nzp normal to both nxp and nyp
+	vtype nzp=v(nxp,nyp);// Complete the right-handed basis.
     if (orientation) *orientation=Quaternion::from_basis({nxp,nyp,nzp})* *orientation;
 
 	for(int i=0;i<r.size();i++) 

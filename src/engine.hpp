@@ -19,14 +19,16 @@
 namespace sdbd::detail {
 class clustertype;
 class surroundtype;
-// One owner per run. Particles borrow this engine and cannot outlive the run.
+// Settings, random-number generator and numerical routines for one deposition run.
+// Moving particles refer to this engine, which must outlive them.
+// Lengths use simulation units; gravity points along -z and the plane lies at z=0.
 class Engine {
 public:
-    // Create independent run state; copying is disabled because bodies borrow this owner.
+    // Create independent state for one run.
     Engine() = default;
-    // Copying is disabled because existing bodies borrow this owner.
+    // Particles refer to this engine; copying it would not redirect those references.
     Engine(const Engine&) = delete;
-    // Assignment cannot replace state borrowed by existing bodies.
+    // Do not replace the state while particles may refer to it.
     Engine& operator=(const Engine&) = delete;
     // Read the seven positional arguments and working-directory input, then deposit; return
     // zero or throw on invalid input/output.
@@ -34,11 +36,11 @@ public:
     // Apply runtime settings and validate finite domains, supported grid spacing and RNG
     // name without drawing random numbers.
     void configure(const SimulationSettings&);
-    // Validate grid dimensions, origin and equal integer spacings in legacy length units;
-    // update periods or throw.
+    // Check grid dimensions, origin and equal integer spacings in simulation units.
+    // Set horizontal periods lx,ly; throw for unsupported settings.
     void validate_parameters();
-    // Validate particle/domain bounds and return imported geometry at dropping height;
-    // update radius bound without RNG draws.
+    // Check that the particle fits the domain; return imported geometry shifted to
+    // the initial drop height. Update the sphere-radius bound without random draws.
     std::optional<ParticleGeometry> prepare_particle(const std::optional<ParticleGeometry>&,int resolution,int count);
     // Initialize all bodies, then deposit sequentially using the seeded GSL stream; write
     // requested outputs and return zero, or throw.
@@ -46,8 +48,8 @@ public:
                 const std::string& identifier,const std::optional<ParticleGeometry>&,
                 bool runtime_output=false,const std::function<void(int,int)>& progress={});
 
-    // Draw an absolute horizontal COM position uniformly in area from a centered
-    // disk of radius min(lx,ly)/4, consuming exactly two original GSL uniforms.
+    // Draw a COM position uniformly over a centered disk of radius min(lx,ly)/4.
+    // Use r=R*sqrt(U1), theta=2*pi*U2: two GSL draws give uniform area sampling.
     vtype circular_drop_position();
     InjectionMode injection{InjectionMode::uniform};
 
@@ -76,20 +78,21 @@ public:
     long double eps=60*1e-10;
 
 
-    long double phi=0.01;// frustrated-motion angle; keep the original literal precision
+    long double phi=0.01;// Small rotation step for frustrated contacts, in radians.
     rotinftype rotinfphi;
 
-    long double Rmax=34;//Maximal radius of a sphere in a system
-    long double h0=60000000;//initial dropping height of particles
-    long double epsz=60*1e-10;//particle is allowed to increase its height by maximum this value, to prevent issues when the structure is crystilline
-    long double epstang=1e-6;//allows nearly grazing collisions to be classified as collisions.
+    long double Rmax=34;// Upper sphere-radius bound used to find neighboring grid cells.
+    long double h0=60000000;// Initial drop height in simulation length units.
+    long double epsz=60*1e-10;// Maximum permitted upward COM roundoff, in simulation length units.
+    long double epstang=1e-6;// Dimensionless threshold separating grazing and opening contacts.
     int particle{};
 
     long double l_pi=3.14159265359;
 
 
-    // Compute downward travel dtl for two spheres (legacy length units); return false when
-    // their horizontal disks do not intersect.
+    // Compute the vertical displacement dtl at contact between moving sphere r1,R1
+    // and fixed sphere r2,R2. Return false if their horizontal disks do not overlap.
+    // The caller checks that the contact lies along the downward path.
     bool pcontact0(vtype r1,long double R1,vtype r2,long double R2,long double& dtl);
     // Intersect a rotating sphere trajectory with a fixed sphere; return two
     // axis/cosine/sine solutions or false if no intersection exists.
@@ -109,7 +112,9 @@ public:
     // Find rotations where constituent rc of radius Rc touches z=0 while rolling about rs;
     // write two solutions if present.
     bool toground1(const vtype&rs,vtype cm,vtype rc,const long double Rc,rotinftype& rotinf1,rotinftype& rotinf2);
-    // Return dimensionless signed closing rate between rc and rs for one-support descent about rp; axis and distances must be nonzero.
+    // Test contact motion while rotating about rp: negative means rc approaches rs,
+    // positive means separation. The dimensionless result requires nonzero distances
+    // and a defined rotation axis; its magnitude is not a physical speed.
     long double g(const vtype& rp, const vtype& cm, const vtype& rc, const vtype& rs);
     // Return the unit COM descent direction around support rp; require a nonzero horizontal offset.
     vtype grad(const vtype& rp,const vtype& cm);
@@ -128,7 +133,8 @@ public:
     // Find rotations placing constituent rc of radius Rc on z=0 about two distinct
     // supports; write solutions if present.
     bool toground2(const vtype& rp1,vtype rp2,const vtype& cm, vtype rc,const long double Rc,rotinftype& rotinf1,rotinftype& rotinf2);
-    // Return dimensionless signed closing rate of rc against rs for descent about two distinct supports.
+    // Test contact motion during descent about the rp1/rp2 axis: negative means
+    // approach, positive means separation. Return a dimensionless direction measure.
     long double g2(const vtype& rp1,const vtype& rp2,const vtype& cm,const vtype& rc,const vtype& rs);
     // Return unit COM descent direction about two distinct supports; require a nonzero
     // rotational radius.
@@ -142,32 +148,36 @@ public:
     // Write candidate grid index bounds for sphere r,R, including Rmax and horizontal
     // periodic images; equal grid spacings are required.
     void findindex(const vtype& r,long double R,int& ixl,int& ixr,int& iyl,int& iyr,int& izu);
-    // Return rc distance in legacy length units from the horizontal descent axis through rp defined by cm.
+    // Return the distance from rc to the horizontal rotation axis through rp,
+    // perpendicular to the horizontal COM offset.
     long double distance_from_axis(const vtype& rc,const vtype& rp,const vtype& cm);
     // Rotate r by phi radians about the horizontal descent axis through rp defined by cm;
     // return its new coordinates.
     vtype rotpoint(const vtype& r,const vtype& rp,const vtype& cm,long double phi);
-    // Return rc distance in legacy length units from the axis through distinct points rp and rp2.
+    // Return the distance from rc to the line through distinct points rp and rp2.
     long double distance_from_axis2(const vtype& rc,const vtype& rp,const vtype& rp2);
     // Rotate r by phi radians about the two-support descent axis oriented using cm; return
     // new coordinates.
     vtype rotpoint2(const vtype& r,const vtype& rp,const vtype& rp2,const vtype& cm,long double phi);
-    // Own a newly allocated GSL generator of type, or the environment default when empty;
-    // throw for invalid type/allocation.
+    // Create and own a GSL generator of the requested type, or the environment/default
+    // type when empty. Throw for an unknown type or allocation failure.
     void initrand(const std::string& type = {});
     // Set the owned GSL generator seed without drawing; throw when the generator is uninitialized.
     void seed(unsigned long value);
     // Read the ordered legacy input fields including original output-label spelling;
     // validate or throw with field diagnostics.
     void load_parameters(const char* inputfile);
-    // Return the sphere-volume-weighted COM of disjoint spheres r,R in input order; do not
-    // use for overlapping-particle physics.
+    // Calculate COM by weighting sphere centers by radius cubed, in input order.
+    // This assumes disjoint spheres of equal density; it is not used to replace
+    // a supplied physical COM for overlapping geometry.
     vtype cmass(const std::vector<vtype>& r, const std::vector<long double>& R);
-    // Check periodic interparticle overlaps using stored particle identity and legacy
-    // tolerances; report/reject penetration, ignoring internal overlaps.
+    // Reject interparticle penetration deeper than 60*1e-8 length units, including
+    // periodic images. Ignore internal overlaps. Return zero if the check succeeds;
+    // otherwise print the offending pair and throw.
     int checkinters(surroundtype& su);
-    // Check periodic interparticle overlaps using stored particle identity and legacy
-    // tolerances; report/reject penetration, ignoring internal overlaps.
+    // Return true and print the offending pair if moving particle c penetrates the
+    // fixed environment by more than 60*1e-6 length units. Include periodic images
+    // and ignore spheres with the same particle id.
     bool checkinters(const clustertype& c,const surroundtype& s);
     // Append a settled body and its physical COM to the fixed environment; wrap constituent
     // coordinates into the periodic cell.
@@ -175,16 +185,17 @@ public:
     // Insert sphere v,R and its particle identity/active-boundary flag at index ii; reject
     // positions outside the finite grid.
     void unloadsphere(const vtype& v,int ii,long double R,surroundtype& su,std::size_t particle_id,bool collision_active);
-    // Append unique fixed/moving coordinates and sphere-index pairs for active contacts within
-    // eps_contact (legacy length units), preserving search order.
+    // Append nearby contact pairs within gap eps_contact in simulation length units.
+    // rps,rds hold fixed/moving centers; p,d hold their sphere indices in matching order.
+    // Visit periodic neighbors without recording the same pair twice.
     void find_cluster_contacts(long double eps_contact,const clustertype& c,const surroundtype& su,std::vector<vtype>& rps,std::vector<vtype>& rds,std::vector<int>& p,std::vector<int>& d);
     // Write fixed sphere x,y,z,radius rows at legacy precision 15; preserve ordering and
     // throw on output failure.
     void output(surroundtype& su,std::string fname);
     // Append rigid-particle count and intersection status to name; throw on output failure.
     void writedetails(int size,int intersect,std::string name);
-    // Append twice COM height z in legacy length units to name at precision 15; throw on
-    // output failure.
+    // Append twice the packing COM height to name, using 15 significant digits.
+    // This legacy height estimate is not the highest particle surface. Throw on file errors.
     void write2cm(long double z,std::string name);
     // Draw one GSL uniform variate in [0,1); throw if the generator is uninitialized.
     long double ranf() { if (!rng_) throw std::logic_error("RNG not initialized"); return gsl_rng_uniform(rng_.get()); }

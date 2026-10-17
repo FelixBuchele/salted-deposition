@@ -13,9 +13,10 @@ static_assert(EIGEN_VERSION_AT_LEAST(3,4,0), "GEMSS bundled libigl requires Eige
 
 namespace sdbd {
 namespace {
-// Reject a failed mesh/backend precondition with invalid_argument and its technical message.
+// Throw invalid_argument with the supplied message if a mesh or option check fails.
 void require(bool condition,const char* message) { if (!condition) throw std::invalid_argument(message); }
-// Validate binary STL size/finite vertices on a little-endian host and return its FNV-1a checksum; throw on malformed input.
+// Check binary STL size and finite vertices before GEMSS reads the file.
+// Require a little-endian host; return an FNV-1a checksum or throw on invalid input.
 std::string preflight(const std::filesystem::path& path) {
     require(std::endian::native==std::endian::little,"GEMSS binary STL loader requires little-endian host");
     std::ifstream file(path,std::ios::binary);
@@ -37,10 +38,12 @@ std::string preflight(const std::filesystem::path& path) {
     std::ostringstream out; out<<"fnv1a64:"<<std::hex<<std::setw(16)<<std::setfill('0')<<hash;
     return out.str();
 }
-// Reject degenerate triangles, open/nonmanifold edges, inconsistent winding, disconnected surfaces or zero signed volume; self-intersections remain unchecked.
+// Require nondegenerate triangles and one connected, closed surface with consistent
+// face orientation and nonzero signed volume. Throw on failure. This check does not
+// detect self-intersections.
 void validate_mesh(const GEMSS::STLMesh& mesh) {
     require(!mesh.is_empty() && mesh.vertices.allFinite(),"Empty or nonfinite STL mesh");
-    // Incident face count/orientations and adjacency for a welded mesh edge.
+    // Faces sharing one edge after equal vertex coordinates have been merged.
     struct Edge { int count{},orientation{}; std::vector<int> faces; };
     std::map<std::pair<int,int>,Edge> edges;
     std::vector<std::vector<int>> adjacent(mesh.triangles.rows());
@@ -121,7 +124,8 @@ ParticleGeometry generate_stl(const std::filesystem::path& path,const GemssOptio
     c.search_window=o.search_window; c.persistence=o.persistence;
     c.min_center_distance_rel=o.minimum_center_distance_relative; c.radius_offset_vox=o.radius_offset_voxels;
     c.confine_mesh=o.confine_mesh; c.prune_isolated_spheres=o.prune_isolated_spheres;
-    c.show_progress=false; c.is_2d=false; c.density=1; c.compute_physics=2; // Mandatory TARGET grid, never reconstruction union.
+    // Compute physics from the target grid. With unit density, pack.mass is target volume.
+    c.show_progress=false; c.is_2d=false; c.density=1; c.compute_physics=2;
     // Use GEMSS's voxelization and reconstruction APIs. Keeping the target grid
     // also lets us reject empty masks and record the actual voxel spacing.
     geometry_detail::arithmetic_range();
@@ -150,8 +154,9 @@ ParticleGeometry generate_stl(const std::filesystem::path& path,const GemssOptio
     std::vector<Sphere> spheres;
     for (int i=0;i<pack.radii.size();++i)
         spheres.push_back({Vec3(pack.centers(i,0),pack.centers(i,1),pack.centers(i,2)),pack.radii[i]});
-    // Pinned upstream samples at (i+0.5)*h, but physics sums i*h.
-    // Restore the voxel-center coordinate convention shared by mesh and spheres.
+    // GEMSS places voxels at (i+0.5)*h but sums COM coordinates using i*h.
+    // Add half a voxel in each axis so COM uses the same coordinates as the
+    // mesh and collision spheres. Inertia about COM is unchanged by this shift.
     const long double half=static_cast<long double>(grid.voxel_size)/2;
     const Vec3 center(pack.center_of_mass.x()+half,pack.center_of_mass.y()+half,pack.center_of_mass.z()+half);
     PhysicalProperties p;
@@ -166,8 +171,8 @@ ParticleGeometry generate_stl(const std::filesystem::path& path,const GemssOptio
         <<";min_center_distance_rel="<<c.min_center_distance_rel<<";radius_offset_vox="<<c.radius_offset_vox
         <<";confine_mesh="<<c.confine_mesh<<";prune_isolated_spheres="<<c.prune_isolated_spheres;
     p.parameters=parameters.str();
-    // Backend can set harmless underflow flags internally; validate its returned
-    // finite values explicitly rather than exposing backend FP flags to the solver.
+    // GEMSS may set underflow flags during reconstruction. After checking its
+    // returned values above, clear the flags before restoring solver error traps.
     require(!std::fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW),"GEMSS reported invalid arithmetic");
     std::feclearexcept(FE_ALL_EXCEPT);
     return ParticleGeometry(std::move(spheres),center,std::move(p),

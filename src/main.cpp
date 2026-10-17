@@ -1,7 +1,7 @@
 #include "cli.hpp"
 #include <exception>
 #include <iostream>
-// Execute the configuration-first frontend; diagnose handled errors and return nonzero.
+// Run the requested CLI command; print errors and return a nonzero status on failure.
 int main(int argc, char** argv) {
     try {
         return sdbd::cli::command_line(argc,argv);

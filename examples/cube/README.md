@@ -1,18 +1,36 @@
-# Cube: original surface-lattice representation
+# Cube deposition
 
-From the repository root:
+This example deposits 12 cube-shaped particles using the sphere representation
+from Nikola Topic's original implementation. It provides a simple starting point
+and a geometry for comparisons with the original code.
 
-```sh
+## Run
+
+After [building SALTED](../../README.md#build-salted), run from the project folder:
+
+```bash
 build/deposit run examples/cube/config.conf
 ```
 
-This small example deposits **12 bodies**, seed **84328**, GSL **mt19937**, in a
-**1440 × 1440 × 1440 mm** observation cell with periodic sides and an open top.
-Each nominal **180 mm** cube uses the original perturbed surface lattice at
-resolution **3**: **26 overlapping spheres**, rather than a solid exact cube.
-The original COM approximation and generator random draws are retained.
+The settings in [config.conf](config.conf) specify a nominal cube edge of 180 mm,
+resolution 3 and a 1440 × 1440 × 1440 mm domain. Each particle has 26 spheres on
+its surface. The random seed is 84328 and the generator is mt19937. Horizontal
+boundaries are periodic; the maximum packing height is 1440 mm.
 
-Outputs: `results/cube/run.conf` and `results/cube/deposition.vtk`.
-Use the main README's [ParaView sphere settings](../../README.md#build-run-and-view).
-The example favors a quick run rather than a tall pile. Change `count` and `box`
-in a copy of the config for a larger study, choosing a fresh output directory.
+## Results and customization
+
+Results are written to `results/cube/`:
+
+- `deposition.vtk`: the deposited spheres, grouped by particle identifier.
+- `run.conf`: the simulation settings and information about the completed run.
+
+Use the VTK file to inspect particle orientations and contacts. See the
+[export guide](../../docs/exports.md) for visualization settings.
+
+Change `count` and `box` for a larger deposit, or `size` and `resolution` to change
+the particle dimensions and sphere discretization. Choose a new output folder
+with `--output` when repeating a run to preserve previous results.
+
+The cube retains the original small geometric perturbations and center-of-mass
+approximation. Its sphere surface approximates a cube; it does not have exact
+flat faces. See the [particle reference](../../docs/particles.md#generators) for details.

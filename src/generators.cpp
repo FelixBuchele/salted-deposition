@@ -24,7 +24,8 @@ ParticleGeometry generate_stick(long double length, long double radius, std::siz
 }
 namespace {
 using vtype = Vec3;
-// Original built-in formulas and shared random callback; owns temporary constituent arrays.
+// Build the original shapes from sphere centers and radii.
+// The caller supplies random numbers so geometry generation uses the simulation stream.
 class LegacyGenerator {
 public:
     std::vector<Vec3> r;
@@ -41,14 +42,15 @@ public:
     }
     // Return one signed uniform variate in [-1,1), consuming one callback draw.
     long double ranfs() { return -1+2*ranf(); }
-    // Return coordinate jitter in baseline z,y,x draw order, in length units.
+    // Return a coordinate offset with components in [-amplitude,amplitude).
+    // Draw z,y,x explicitly to keep the original random-number order.
     Vec3 jitter(long double amplitude) {
         const auto z=amplitude*ranfs();
         const auto y=amplitude*ranfs();
         const auto x=amplitude*ranfs();
         return Vec3(x,y,z);
     }
-    // Fill arrays with one radius-30 sphere at height_, without random draws.
+    // Create one sphere of radius 30*scale_ at height_, without random draws.
     void init_sphere();
     // Fill six perturbed axis arms at height_; nsph_per_side controls legacy discretization.
     void init_axes_lines_mshuffle(int nsph_per_side);
@@ -58,11 +60,11 @@ public:
 void LegacyGenerator::init_sphere()
 {
 
-	//addition of a sphere
+
 	r.clear();R.clear();
 	vtype v(0,0,height_);
 	r.push_back(v);R.push_back(30.*scale_);
-	//end of sphere addition
+
 
 }
 
@@ -103,32 +105,32 @@ void LegacyGenerator::init_cube_mshuffle(int nsph_per_side)
 	long double Rp=(30.-eps_sh)*scale_;eps_sh*=scale_;
 	long double D=2*30.*scale_;
 
-	//xy plane
+	// Bottom face: include every edge and corner.
 	for(int i=0;i<nsph_per_side;i++)
 	for(int j=0;j<nsph_per_side;j++)
 	{vtype v=D*(i*ex+j*ey);v.z()=v.z()+height_;const auto dv=jitter(eps_sh);r.push_back(v+dv);R.push_back(Rp-eps_sh*ranf());}
 
-	//xy plane shifted
+	// Top face: same lattice, shifted by the cube edge length.
 	for(int i=0;i<nsph_per_side;i++)
 	for(int j=0;j<nsph_per_side;j++)
 	{vtype v=D*(i*ex+j*ey);v.z()=v.z()+height_;v.z()=v.z()+(nsph_per_side-1)*D;const auto dv=jitter(eps_sh);r.push_back(v+dv);R.push_back(Rp-eps_sh*ranf());}
 
-	//xz plane
+	// Front face: skip edges already included on the bottom and top.
 	for(int i=0;i<nsph_per_side;i++)
 	for(int j=1;j<nsph_per_side-1;j++)
 	{vtype v=D*(i*ex+j*ez);v.z()=v.z()+height_;const auto dv=jitter(eps_sh);r.push_back(v+dv);R.push_back(Rp-eps_sh*ranf());}
 
-	//xz plane shifted
+	// Back face: the same edge exclusion as the front.
 	for(int i=0;i<nsph_per_side;i++)
 	for(int j=1;j<nsph_per_side-1;j++)
 	{vtype v=D*(i*ex+j*ez);v.z()=v.z()+height_;v.y()=v.y()+(nsph_per_side-1)*D;const auto dv=jitter(eps_sh);r.push_back(v+dv);R.push_back(Rp-eps_sh*ranf());}
 
-	//yz plane
+	// Left face: skip edges already included by the other four faces.
 	for(int i=1;i<nsph_per_side-1;i++)
 	for(int j=1;j<nsph_per_side-1;j++)
 	{vtype v=D*(i*ey+j*ez);v.z()=v.z()+height_;const auto dv=jitter(eps_sh);r.push_back(v+dv);R.push_back(Rp-eps_sh*ranf());}
 
-	//yz plane shifted
+	// Right face: likewise include only the remaining face interior.
 	for(int i=1;i<nsph_per_side-1;i++)
 	for(int j=1;j<nsph_per_side-1;j++)
 	{vtype v=D*(i*ey+j*ez);v.z()=v.z()+height_;v.x()=v.x()+(nsph_per_side-1)*D;const auto dv=jitter(eps_sh);r.push_back(v+dv);R.push_back(Rp-eps_sh*ranf());}

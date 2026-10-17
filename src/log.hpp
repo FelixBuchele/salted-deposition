@@ -1,8 +1,8 @@
 #pragma once
 #include <iostream>
 namespace sdbd::detail {
-// Print values to stdout with original separators and a flushed newline;
-// diagnostics preserve positional-interface output bytes.
+// Print diagnostic values separated by three spaces, followed by a flushed newline.
+// Keep the original formatting for runs using positional arguments.
 template<class First, class... Rest>
 void ds(const First& first, const Rest&... rest) {
     std::cout << first;

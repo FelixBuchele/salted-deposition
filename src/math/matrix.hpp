@@ -6,7 +6,7 @@
 #include "vector.hpp"
 
 namespace sdbd::detail {
-// Long-double 3x3 coordinate transform with explicitly stored entries.
+// A 3x3 matrix used to convert local circle coordinates to simulation coordinates.
 class matrix
 {
 	public:
@@ -20,5 +20,5 @@ class matrix
 };
 
 // Return matrix m applied to vector v using the original multiplication and summation order.
-vtype ma(const matrix& m, const vtype& v);//matrix action on a vector
+vtype ma(const matrix& m, const vtype& v);
 }

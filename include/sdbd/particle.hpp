@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace sdbd {
-// One constituent sphere in body coordinates; center and positive radius use legacy length units.
+// One sphere of a rigid particle, in body coordinates and the particle's declared units.
 struct Sphere {
     Vec3 center{};
     long double radius{};
@@ -23,8 +23,9 @@ struct Bounds {
     Vec3 maximum;
 };
 
-// Uniform density. Inertia is about the physical COM in the current axes,
-// at unit density (length^5); mass = density * target volume.
+// Physical properties of the target geometry, assuming uniform density.
+// Inertia is about the physical center of mass (COM), in the current axes and
+// at unit density (length^5). Overlapping collision spheres do not define mass.
 struct PhysicalProperties {
     long double volume{};
     long double density{1};
@@ -35,24 +36,25 @@ struct PhysicalProperties {
     long double mass() const { return density*volume; }
 };
 
-// Original STL reference and its current body-frame origin/active rotation.
-// Uniform scale is PhysicalProperties::source_scale; no mesh data is stored here.
+// Location and orientation of the original STL coordinate frame within the particle.
+// Its uniform scale is PhysicalProperties::source_scale; the mesh itself is not copied.
 struct StlSource {
     std::filesystem::path path;
     Vec3 origin;
     Quaternion orientation;
 };
 
-// Geometry only: no contact state, world position, RNG ownership or solver dependency.
-// Automatic COM assumes uniform density and disjoint spheres. Overlaps require
-// a caller-supplied physical COM; its physical correctness cannot be inferred.
+// Reusable particle geometry, separate from the deposition state.
+// For disjoint spheres, COM may be calculated at uniform density. For overlapping
+// spheres, the caller must supply the physical COM: sphere weighting would count
+// shared volume more than once. Validation cannot establish its physical accuracy.
 class ParticleGeometry {
 public:
     // Bound initial pairwise validation to fewer than 50 million sphere pairs.
     static constexpr std::size_t maximum_spheres = 10'000;
-    // Validate finite spheres and optional physical COM/properties; overlaps require
-    // explicit COM. Units label coordinates without converting them; reject unknown
-    // units, invalid geometry or numerical range.
+    // Store and validate spheres, COM and optional physical properties.
+    // Overlaps require an explicit COM. The units label does not rescale coordinates.
+    // Throw for unknown units, invalid geometry or values outside the supported range.
     explicit ParticleGeometry(std::vector<Sphere> spheres,
                               std::optional<Vec3> physical_center = std::nullopt,
                               std::optional<PhysicalProperties> properties = std::nullopt,
@@ -60,18 +62,18 @@ public:
                               std::string units = "legacy");
     // Return the declared coordinate unit; legacy means caller-assigned original units.
     const std::string& units() const noexcept { return units_; }
-    // Return original STL/frame provenance when retained; absence disables STL-pose export.
+    // Return the original STL reference and frame, if available for pose export.
     const std::optional<StlSource>& stl_source() const noexcept { return source_; }
-    // Return a read-only constituent view in legacy length units; lifetime follows this object.
+    // View the spheres in declared units; valid until this geometry is replaced or destroyed.
     std::span<const Sphere> spheres() const noexcept { return spheres_; }
     // Return the stored physical COM in the same coordinates as constituent centers.
     Vec3 center_of_mass() const noexcept { return center_; }
-    // Return optional target-derived volume, density, COM-frame inertia and provenance;
-    // lifetime follows this geometry.
+    // Return optional target volume, density, inertia about COM and source information.
+    // The reference remains valid while this object is alive.
     const std::optional<PhysicalProperties>& physical_properties() const noexcept { return properties_; }
-    // Return axis-aligned bounds including sphere radii, in legacy length units.
+    // Return axis-aligned bounds including radii, in declared length units.
     Bounds bounds() const noexcept { return bounds_; }
-    // Return positive axis-aligned extent including radii, in legacy length units.
+    // Return the bounding-box dimensions including radii, in declared length units.
     Vec3 dimensions() const noexcept { return bounds_.maximum - bounds_.minimum; }
     // Return whether the stored COM was explicitly supplied or carried through a transformation.
     bool has_explicit_center() const noexcept { return explicit_center_; }
@@ -80,21 +82,22 @@ public:
     bool has_overlaps() const noexcept { return overlaps_; }
     // Return whether the collision union is a single sphere centered exactly on the physical COM.
     bool is_centered_sphere() const noexcept { return centered_sphere_; }
-    // Return largest constituent radius in legacy length units.
+    // Return the largest sphere radius, in declared length units.
     long double maximum_radius() const noexcept { return maximum_radius_; }
-    // Return the maximum COM-to-center distance plus radius, in legacy length units.
+    // Return the radius of a COM-centered bound enclosing all spheres, in declared units.
     long double bounding_radius() const noexcept { return bounding_radius_; }
-    // Return exposed constituent indices; contained spheres remain stored for I/O.
+    // Return indices of spheres not fully contained in another sphere.
+    // Contained spheres remain stored and exported, but cannot add a contact surface.
     std::span<const std::size_t> collision_spheres() const noexcept { return collision_spheres_; }
 
-    // Return geometry and physical COM translated by displacement; inertia about COM is
-    // unchanged. Reject nonfinite/range-invalid results.
+    // Translate spheres, COM and the STL frame by displacement; return a new geometry.
+    // Inertia about COM is unchanged. Throw if the resulting coordinates are invalid.
     ParticleGeometry translated(Vec3 displacement) const;
-    // Return geometry scaled about the origin by positive factor; volume scales cubically
-    // and unit-density inertia by factor^5. Reject invalid range.
+    // Scale all lengths about the origin by a positive factor; return a new geometry.
+    // Volume scales by factor^3 and unit-density inertia by factor^5. Throw on invalid values.
     ParticleGeometry scaled(long double factor) const;
-    // Return geometry/COM rotated by radians about nonzero axis through pivot; rotate
-    // COM-frame inertia by R I R^T. Reject invalid inputs/range.
+    // Rotate spheres, COM and the STL frame about axis through pivot; return a new geometry.
+    // The angle is in radians. Rotate inertia as R I R^T; throw on invalid inputs or results.
     ParticleGeometry rotated(Vec3 axis, long double radians, Vec3 pivot = Vec3{}) const;
 
 private:
@@ -122,28 +125,30 @@ enum class BuiltinShape { sphere, spiky, cube };
 // Callback returns one original uniform variate in [0,1). No RNG substitution.
 using UniformRandom = std::function<long double()>;
 // Generate original sphere, six-arm or surface-lattice cube at initial_height; resolution
-// controls discretization and random supplies baseline variates. length_scale
+// controls discretization; random supplies uniform numbers in [0,1). length_scale
 // scales radii, spacing and jitter, leaving the dropping origin unchanged.
 ParticleGeometry generate_builtin(BuiltinShape shape, int resolution,
                                   const UniformRandom& random, long double initial_height = 0,
                                   long double length_scale = 1);
 
 // Return a symmetric stick of equal, overlapping spheres along x. Length includes
-// end caps; radius and length use legacy units. Uniform union density gives COM=0.
+// end caps; radius and length must use the same unit. Symmetry gives COM=0 at uniform density.
 // Reject nonfinite/nonpositive dimensions, fewer than two spheres, excessive count,
 // or spacing outside (0,2*radius). No random numbers are consumed.
 ParticleGeometry generate_stick(long double length, long double radius, std::size_t sphere_count);
 
-// Parse version-1/2/3 multisphere data in classic locale; return validated scaled
-// geometry/COM or throw. Resolve version-3 STL paths against base (cwd if omitted).
+// Read version-1/2/3 particle data using a decimal point; apply its scale and validate.
+// Resolve version-3 STL paths relative to base (current directory if omitted).
+// Return geometry with its physical COM, or throw on invalid input.
 ParticleGeometry read_particle(std::istream& input,const std::filesystem::path& base = {});
-// Write canonical max_digits10 geometry, COM, optional properties and STL frame;
-// express STL paths relative to nonempty base. Throw on output failure.
+// Write geometry, COM, optional properties and the STL frame with enough digits
+// to recover long-double values. Write STL paths relative to base when supplied.
+// Throw on output failure.
 void write_particle(std::ostream& output, const ParticleGeometry& particle,const std::filesystem::path& base = {});
 // Load and validate a particle file; return geometry or throw with path-qualified parsing
 // diagnostics.
 ParticleGeometry load_particle(const std::filesystem::path& path);
-// Write canonical particle geometry to path, replacing an existing file; throw on
-// open/write/close failure.
+// Save the particle in the format above, replacing an existing file.
+// Throw if opening, writing or closing the file fails.
 void save_particle(const std::filesystem::path& path, const ParticleGeometry& particle);
 }

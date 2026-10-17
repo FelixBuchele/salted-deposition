@@ -9,8 +9,9 @@ namespace sdbd::detail {
 class surroundtype;
 class Engine;
 
-// Contact-event state and physical COM; d indices name moving constituents, p indices fixed
-// spheres; -1 denotes absent contacts.
+// Current or candidate contact state, with physical center of mass cm.
+// Each d/p pair identifies a moving sphere and its fixed support sphere.
+// Index -1 means absent; support -2 denotes the plane. td,tp remember a lost contact.
 class clusterbase
 {
 	public:
@@ -19,22 +20,22 @@ class clusterbase
 		int d1{-1},p1{-1},d2{-1},p2{-1},d3{-1},p3{-1},td{-1},tp{-1};
         bool f{}; // Last contact change was a grazing loss requiring special recontact handling.
 		vtype cm;
-        // Compare future COM heights; max_element retains the first equal-height event.
+        // Compare future COM heights: during descent, the highest event is reached
+        // first. max_element keeps the first candidate when heights tie.
 		bool operator<(const clusterbase& c) const {return (*this).cm.z()<c.cm.z();}; 
         // Compare COM heights in descending order without changing event state.
 		bool operator>(const clusterbase& c) const {return (*this).cm.z()>c.cm.z();}; 
 };
 
 
-// Candidate falling event containing contact state and future physical COM, without constituent
-// copies.
+// A possible end of vertical fall: future COM and contacts, without copying the spheres.
 class fallattempt : public clusterbase
 {
 
 };
 
 
-// Candidate rotational event with contact state, physical COM and common axis/cosine/sine data.
+// A possible end of rotation: future COM, contacts and the rotation to reach them.
 class rotattempt : public clusterbase
 {
 	public:
@@ -42,8 +43,8 @@ class rotattempt : public clusterbase
 };
 
 
-// Candidate contact-constrained trajectory; gz is the vertical component of its unit COM
-// descent direction.
+// A possible motion consistent with the contacts. gz is the vertical component
+// of the unit COM direction; the most negative value gives the steepest descent.
 class gradrotattempt : public rotattempt
 {
 	public:
@@ -51,8 +52,9 @@ class gradrotattempt : public rotattempt
 };
 
 
-// Mutable rigid-particle solver state borrowing one Engine; coordinates, radii and collision
-// flags share indexing and physical COM is authoritative.
+// One moving particle: sphere centers r, radii R, contacts and physical COM.
+// Sphere arrays use the same indices. Motion updates the stored COM rather than
+// recalculating it from overlapping spheres. The engine must outlive this particle.
 class clustertype : public clusterbase
 {
 	public:
@@ -60,30 +62,32 @@ class clustertype : public clusterbase
 		std::vector<long double> R;
 
 	public:
-		// Return the sphere-volume-weighted COM of disjoint spheres r,R in input order; do not use
-		// for overlapping-particle physics.
+		// Calculate COM using radius-cubed weights, for the original built-in shapes.
+		// Overlapping imported particles retain their supplied physical COM instead.
 		vtype cmass();
-		// Copy validated constituent geometry and physical COM into mutable body state; borrow
-		// engine and preserve particle id/collision membership.
+		// Start a moving particle from validated geometry, retaining its physical COM,
+		// particle id and exposed-sphere indices. Keep a reference to engine.
 		clustertype(Engine& engine, const ParticleGeometry& geometry, std::size_t id);
 		std::size_t particle_id;
         std::optional<Quaternion> orientation; // Engaged only for requested STL pose export.
-		// Advance contact events against su until fixed; return true for a collapsed attempt that
-		// may require redrop, preserving physical COM.
+		// Follow fall and rotation events until the particle stops in fixed environment su.
+		// Return true if events stop making progress (numerical collapse); the caller
+		// decides whether to accept that state or retry the drop.
 		bool settle(surroundtype& su);
 		// Translate body and COM together by a domain period when COM crosses a horizontal boundary.
 		void periodic(long double lx,long double ly);
-		// Translate every constituent and physical COM by v in legacy length units without
-		// recomputing mass distribution.
+		// Translate all sphere centers and the physical COM by displacement v.
+		// Do not recalculate COM from the spheres.
 		void movecluster(const vtype& v);
 		// Rotate constituents about the stored physical COM using the original random-basis
 		// construction and GSL draw order.
 		void randrot();
-        // Translate x/y geometry and COM; legacy_recompute_center is allowed only for
-        // inferred disjoint-sphere COM, otherwise throw.
+        // Shift geometry and COM horizontally by x,y in simulation length units.
+        // The compatibility flag recalculates the built-in COM after shifting;
+        // throw if it would overwrite an explicitly supplied physical COM.
         void shift_horizontal(long double x,long double y,bool legacy_recompute_center=false);
-        // Return whether constituent index contributes an exposed union boundary; index
-        // must lie within the body.
+        // Return whether this sphere can contribute a contact surface.
+        // Fully contained spheres are excluded; index must be within the body.
         bool collision_active(std::size_t index) const { return collision_active_[index]; }
 
 	private:
@@ -109,11 +113,11 @@ class clustertype : public clusterbase
 		// Choose/apply the next one-contact event in su; temporarily perturb a directly-above
 		// support with two horizontal random draws.
 		void rotate1(surroundtype& su);
-		// Append permitted phi-rotation events for a frustrated one-support trajectory about rp;
-		// retain original height/side tests.
+		// If the contacting sphere lies below its support rp, test a small phi rotation
+		// before releasing contact. Append the event only if the height and side tests pass.
 		void steeperdphi(const vtype& rp,std::vector<rotattempt>& atvec);
-		// Append collision events found along one-support rotation using overlapping grid-search
-		// volumes; preserve candidate and tie order.
+		// Search the swept rotation path about one support for new sphere contacts.
+		// Overlapping search volumes cover the path; append events in search order.
 		void brot1(surroundtype& s,std::vector<rotattempt>& attempts);
 		// Append loss-of-contact event when the contacting constituent reaches support rp height.
 		void hrot(const vtype& rp,std::vector<rotattempt>& attempts);
@@ -128,8 +132,8 @@ class clustertype : public clusterbase
 		// Choose/apply the next two-contact event in su, including grazing loss, frustration,
 		// collision, hanging and plane contact.
 		void rotate2(surroundtype& su);
-		// Append phi-rotation events that resolve a frustrated trajectory about supports rp1/rp2 by
-		// selecting a steeper valid contact set.
+		// Test a small phi rotation about supports rp1/rp2 when a steeper path would
+		// use fewer contacts. Append it if the rotated state permits that path.
 		void steeperdphi2(const vtype& rp1,const vtype& rp2,std::vector<rotattempt>& atvec);
 		// Append sphere-contact events during two-support rotation using periodic grid candidates
 		// and unchanged event order.
@@ -148,8 +152,9 @@ class clustertype : public clusterbase
 		bool positivecircle(const vtype& rp1,const vtype& rp2,const vtype& rd2,const rotinftype& rotinf);
 		// Apply event state and identical rotation to constituents/COM about rp; su is unused.
 		void step2(const rotattempt& att,surroundtype& su,const vtype& rp);
-		// Select the valid falling/one-/two-support path with lowest vertical gradient; read
-		// contact spans and write att, retaining tie order.
+		// Choose the steepest allowed fall or rotation at COM cmc and write contact state att.
+		// rp,rd are fixed/moving centers; p,d are their matching sphere indices.
+		// Reject paths that close another contact; keep the first path when slopes tie.
 		void find_steepest_descent(std::span<const vtype> rp,std::span<const vtype> rd,std::span<const int> p,std::span<const int> d,const vtype& cmc,rotattempt& att);
 
 };

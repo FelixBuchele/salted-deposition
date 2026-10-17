@@ -1,55 +1,61 @@
-# Rock: reusable STL-derived particle
+# Rock deposition from STL
 
-Felix Buchele owns the unchanged `example_mesh.stl` and authorized MIT distribution
-of this mesh and `rock.particle`. Coordinates are **mm**, uniform scale **1**.
-The binary STL contains **96,250 triangles**, dimensions approximately
-**9.252 × 9.998 × 7.275 mm**; its hash is recorded in the license notes.
+This example uses an irregular rock defined by [example_mesh.stl](example_mesh.stl).
+The included [rock.particle](rock.particle) already contains its 19-sphere
+representation and physical properties, so the simulation can run without
+repeating GEMSS generation.
 
-From the repository root:
+## Run
 
-```sh
+After [building SALTED](../../README.md#build-salted), run from the project folder:
+
+```bash
 build/deposit run examples/rock/config.conf
 ```
 
-The prepared file needs no GEMSS build. It deposits **24 bodies**, seed **84328**,
-GSL **mt19937**, in a **60 × 60 × 60 mm** observation cell, retaining the original
-phi/redrop defaults. Outputs are `results/rock/run.conf`, `deposition.vtk` and
-`stl_poses.vtk`, all in the same directory.
+The settings in [config.conf](config.conf) deposit 24 rocks in a 60 × 60 × 60 mm
+domain with periodic horizontal boundaries. The seed is 84328 and the generator
+is mt19937. The mesh coordinates are millimetres and the scale factor is 1.
 
-## Regenerate and reuse
+## Results
 
-Build with GEMSS as described in the main README, then:
+Results are written to `results/rock/`:
 
-```sh
-build-gemss/deposit validate --config examples/rock/generation.conf
-build-gemss/deposit generate examples/rock/generation.conf
-printf 'particle = rock-regenerated.particle\n' > results/rock-input.conf
-build/deposit run examples/rock/config.conf --overrides results/rock-input.conf --output results/rock-regenerated
+| File | Use |
+|---|---|
+| `deposition.vtk` | Display the collision spheres and inspect contacts. |
+| `stl_poses.vtk` | Combine with the unchanged `example_mesh.stl` to display the deposited rock surfaces. |
+| `run.conf` | Inspect or reuse the simulation settings and recorded physical centers of mass. |
+
+The sphere view shows the geometry used by the solver. The STL view shows the
+original rock surface, including details omitted by the approximation. See the
+[export guide](../../docs/exports.md) for formats and ParaView setup.
+
+## Regenerate or use another mesh
+
+Enable GEMSS using the [build instructions](../../README.md#build-salted), then run:
+
+```bash
+build/deposit validate --config examples/rock/generation.conf
+build/deposit generate examples/rock/generation.conf
 ```
 
-The generated file is `results/rock-regenerated.particle`; the overlay selects
-it relative to `results/rock-input.conf`. Choose new output paths for repeated runs.
-These commands leave the included prepared file unchanged.
+The [generation configuration](generation.conf) uses voxel resolution 24, at most
+50 spheres and requested Dice similarity 0.9. The included particle file records
+19 spheres and achieved Dice 0.900792. Its remaining generation parameters are
+stored in the same file; the generation configuration sets them for regeneration.
 
-Settings: voxel resolution **24**, cap **50 spheres**, requested Dice **0.9**,
-minimum radius **1 voxel**, relative center distance **0.6**. Other backend
-controls retain their defaults; confinement and pruning are disabled. The
-prepared reconstruction contains **19 spheres**, achieved voxel Dice **0.900792**,
-and spacing **0.303134 mm**. It is an economical approximation with omitted fine
-features, not an exact surface reconstruction.
+Generation writes `results/rock-regenerated.particle`, leaving the included
+`rock.particle` unchanged. Use the complete `rock-study.conf` example in the main
+README's [custom-geometry workflow](../../README.md#use-your-own-particle-geometry)
+to deposit the regenerated particle. For another mesh, copy `generation.conf`
+and change its `stl`, `units` and `output` settings. Choose new output names for
+repeated generation or simulation runs.
 
-Physical properties use the original target voxel grid (`compute_physics=2`),
-independently of collision-sphere overlaps. Stored COM is approximately
-**(-0.044523, -0.150169, -0.383261) mm**, and target volume **247.242584 mm³**.
-The source origin and frame are preserved.
+Physical volume, center of mass and inertia come from the voxelized original
+mesh, independently of collision-sphere overlaps. These properties and the source
+mesh reference are preserved in the particle file.
 
-## View the deposition
-
-Use [ParaView 3D Glyphs](../../docs/exports.md) for collision spheres or original
-STL instances. For the latter, open `example_mesh.stl` and `stl_poses.vtk`, Apply
-both, select the poses, clear the Properties search and enable advanced properties
-(gear). Choose **Glyph Type → Pipeline Connection**, then select the STL in the
-**Input** dropdown below it. Selecting Pipeline Connection opens no dialog.
-Use WXYZ Quaternion orientation and the `scale` array with factor **1**.
-Do not recenter the STL. Contacts use the sphere union; visible STL intersections
-need not mean sphere penetration.
+The mesh and generated particle definition are owned by Felix Buchele and
+included under MIT. See the [license notes](../../docs/licenses.md) for attribution
+and the original mesh checksum.

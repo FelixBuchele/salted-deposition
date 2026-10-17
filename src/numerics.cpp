@@ -23,20 +23,20 @@ bool Engine::pcontact(vtype rp,const vtype& n,vtype rc,long double Rc,vtype rs,l
 {
 	vtype rci=rc,rpi=rp,rsi=rs;
 	long double R=Rc+Rs;
-	rp=rp+s(rc-rp,n)*n;//move reference point to the plane
-	vtype rsp=rs+s(rp-rs,n)*n;//projection point of surround sphere to the plain
-	if(norm(rp-rsp)<eps) return false;//no contact if they are exactly on the line
+	rp=rp+s(rc-rp,n)*n;// Move the axis reference into the rotation plane through rc.
+	vtype rsp=rs+s(rp-rs,n)*n;// Project the fixed center onto that plane.
+	if(norm(rp-rsp)<eps) return false;// Exclude the coaxial case, where the planar construction is singular.
 	if(norm2(rsp-rs)<R*R)
 	{
-		rc=rc-rp;//moving to rp as coordinate system beginning
+		rc=rc-rp;// Use the rotation-circle center as the local origin.
 		rsp=rsp-rp;
 		rs=rs-rp;
 
-		long double Rsp=std::sqrt(R*R-norm2(rsp-rs));// Radius of the fixed sphere's circular section in the rotation plane.
+		long double Rsp=std::sqrt(R*R-norm2(rsp-rs));// Section radius of the exclusion sphere Rc+Rs in the rotation plane.
 		long double Rcd=norm(rc);
 		if(norm2(rsp)<(Rsp+Rcd)*(Rsp+Rcd))
 		{
-			vtype ext=rsp;ext=1/norm(ext)*ext;//orts of new system
+			vtype ext=rsp;ext=1/norm(ext)*ext;// Unit basis for the two-dimensional circle intersection.
 			vtype eyt=v(n,ext);eyt=1/norm(eyt)*eyt;
 			vtype ezt=n;
 			matrix m(ext,eyt,ezt);
@@ -47,7 +47,7 @@ bool Engine::pcontact(vtype rp,const vtype& n,vtype rc,long double Rc,vtype rs,l
 				v2=ma(m,v2);
 				v1=1/norm(v1)*v1;
 				v2=1/norm(v2)*v2;
-				rc=1/norm(rc)*rc;//rc is not needed anymore except as an ort
+				rc=1/norm(rc)*rc;// Only the initial radial direction is needed to recover the angle.
 
 				rotinf1.n=n;
 				rotinf1.cc=s(rc,v1);
@@ -192,9 +192,9 @@ bool Engine::pcontact2(const vtype& rp1,const vtype& rp2,const vtype& cm,const v
 bool Engine::pdisconnect(vtype cm,vtype rp1,vtype rp2,vtype rd1,vtype rd2,rotinftype& rotinf1,rotinftype& rotinf2)
 {
 	vtype n=rp2-rp1;n=(1/norm(n))*n;
-	if(s(ez,v(n,cm-rp1))>0) n=-1*n;//in order to have cos>0 and sin>0 for small rotatons
+	if(s(ez,v(n,cm-rp1))>0) n=-1*n;// Orient the axis so a small positive rotation lowers the COM.
 
-	//all relative to rp1
+	// Express positions relative to the first support.
 	rp2-=rp1;
 	rd1-=rp1;
 	rd2-=rp1;
@@ -391,7 +391,7 @@ bool Engine::planecontact(vtype rp,vtype n,long double R,const vtype& rpl,vtype 
 
 
 
-/********** Grid operations ***********/
+// Spatial search bounds.
 
 void Engine::findindex(const vtype& r,long double R,int& ixl,int& ixr,int& iyl,int& iyr,int& izu)
 {
@@ -403,7 +403,7 @@ void Engine::findindex(const vtype& r,long double R,int& ixl,int& ixr,int& iyl,i
 }
 
 
-/********** Speedup functions ***********/
+// Rotation-axis distances and trial positions used by the contact search.
 
 long double Engine::distance_from_axis(const vtype& rc,const vtype& rp,const vtype& cm)
 {

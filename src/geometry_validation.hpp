@@ -2,8 +2,8 @@
 #include <cfenv>
 #include <stdexcept>
 namespace sdbd::geometry_detail {
-// Geometry import/validation must report range errors even when the caller has
-// enabled solver FP traps. Restore both control settings and flags on exit.
+// Temporarily disable floating-point traps so invalid geometry can be reported
+// with an exception instead of stopping the process. Restore the caller's state on exit.
 class ValidationEnvironment {
     std::fenv_t saved_{};
 public:
@@ -19,7 +19,8 @@ public:
     // Assignment is disabled to prevent replacing a live environment guard.
     ValidationEnvironment& operator=(const ValidationEnvironment&)=delete;
 };
-// Reject invalid/divide/overflow/underflow flags accumulated during geometry arithmetic.
+// Throw if geometry arithmetic raised an invalid-operation, division-by-zero,
+// overflow or underflow flag.
 inline void arithmetic_range() {
     if (std::fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW | FE_UNDERFLOW))
         throw std::invalid_argument("Geometry arithmetic exceeds numerical range");

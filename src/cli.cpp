@@ -50,7 +50,8 @@ void help(std::string_view command = {}) {
         <<"Config paths are file-relative; --output is cwd-relative. Existing outputs are refused.\n"
         <<"See README.md and docs/configuration.md for advanced controls and limits.\n";
 }
-// Append concise replay-ignored metadata to the one run record; throw on failed I/O.
+// Append build, RNG and geometry information as comments in run.conf.
+// These comments do not change a rerun; throw on file errors.
 void metadata(const std::filesystem::path& record,const Configuration& c,
               const std::optional<ParticleGeometry>& geometry,const std::string& state,double seconds) {
     std::ofstream out(record,std::ios::app);

@@ -11,13 +11,13 @@ One `key = value` per line; `#` begins a comment outside double quotes.
 Unknown/duplicate keys, trailing numeric text and misplaced settings fail.
 Booleans are exactly `true` or `false`. `format = SALTED_2` is optional for
 handwritten files and is written in saved run records. Particle files use a
-separate ordered grammar; see [particle formats](particles.md).
+different format with fields in a fixed order; see [particle formats](particles.md).
 
 Precedence: **defaults < CONFIG < --overrides FILE < --output PATH**.
 Each path resolves beside the file that declares it; `--output` resolves from
-cwd. Python's explicit method paths are cwd-relative and become absolute before
-invocation. No original configuration is rewritten. There is one C++ parser and
-one set of scientific defaults.
+the current working directory. Paths passed to Python methods also use the current
+directory and become absolute before the command runs. Original configurations
+are not rewritten; C++ reads and validates all settings.
 
 All operations accept one `--overrides FILE`; `run` and `generate` accept
 `--output PATH`. An overlay replacing `particle` drops a recorded old geometry
@@ -47,7 +47,7 @@ Only the destination is required; other keys retain these existing defaults:
 | `size` | Built-in nominal outer size; default sphere diameter 60, cube edge 60·resolution, spiky extent 60·(2·resolution−1) |
 | `resolution` | Original built-in discretization: cube 3, otherwise 1; cube requires ≥2 |
 | `length`, `radius`, `spheres` | Stick total length, constituent radius and count: 180, 30, 7 |
-| `phi` | Frustrated-motion rotation increment, 0.01 radians; not a time step |
+| `phi` | Small rotation increment used in contact-release tests, 0.01 radians; not a time step |
 | `redrop` | Original retry policy, false; no termination guarantee |
 | `injection` | `uniform` (default): original full-cell placement; `circle`: centered uniform-area disk |
 | `quiet` | Suppress ordinary progress/summary, false |
@@ -64,13 +64,18 @@ Prepared files retain their dimensions and explicit COM. Their declared physical
 units must match the run; `legacy` files take the run unit without conversion.
 Changing the units label alone does not resize geometry or numerical tolerances.
 
+Numerical collapse means that contact events make too little positional progress
+or cannot continue with the current support geometry. With `redrop = true`, the
+solver retries with a new horizontal position and orientation; difficult cases
+may keep retrying indefinitely.
+
 Sides are periodic, the plane is z=0 and the top is open. Height is an acceptance
 limit: exceeding it fails without repositioning. Horizontal lengths must be
 positive integers in the declared unit; height may be fractional. The existing
 search grid derives spacing `gcd(120, Lx, Ly)` and below-plane margin ≥960.
 More than 20 million cells is rejected; commensurate dimensions (e.g. multiples
 of 120) avoid unnecessarily fine grids. Fractional horizontal periods and solid
-walls require numerical work outside this interface update.
+side walls are not supported.
 
 ## GEMSS generation
 

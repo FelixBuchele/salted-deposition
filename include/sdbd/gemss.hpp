@@ -1,8 +1,8 @@
 #pragma once
 #include "sdbd/particle.hpp"
 namespace sdbd {
-// Available only from the optional sdbd_gemss target. STL has no intrinsic units;
-// source_scale converts declared source_units to the solver's legacy length unit.
+// Settings for the optional GEMSS backend. STL files do not declare units.
+// source_scale converts input coordinates from source_units to target_units.
 struct GemssOptions {
     int voxel_resolution{32}, padding{2}, maximum_spheres{64};
     float reconstruction_accuracy{0.95f};
@@ -14,8 +14,9 @@ struct GemssOptions {
     std::string target_units{"legacy"}; // Unit of generated coordinates after source_scale.
     std::size_t maximum_voxels{5'000'000};
 };
-// Generate collision spheres from binary STL via pinned GEMSS; options declare units/scaling.
-// Return target-voxel COM/properties or throw, never sphere-weight fallback.
+// Generate collision spheres from binary STL using GEMSS and the declared units/scale.
+// COM, volume and inertia come from the voxelized target mesh, not the sphere union.
+// Return validated geometry or throw; never substitute a sphere-weighted COM.
 ParticleGeometry generate_stl(const std::filesystem::path& source, const GemssOptions& options);
 // Check parameters, binary STL topology, scaling and voxel resource bounds without
 // voxelizing or generating spheres; throw on unsupported or invalid mesh/options.

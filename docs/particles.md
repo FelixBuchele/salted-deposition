@@ -1,17 +1,19 @@
 # Particle files, properties and generation
 
-All representations use Cartesian body coordinates with finite centers and
-strictly positive radii. Coordinates declare mm, cm, m or unassigned legacy units. The simulation
-uses the same declared unit; legacy files are interpreted in the run unit, with
-no implicit rescaling. Particle bounds, COM, numerical range and domain compatibility are
-validated. Internal overlaps are permitted. Automatic COM is available only for
-disjoint manual spheres; it is the sphere-volume-weighted COM at uniform density.
-Overlapping manual geometry requires `center explicit x y z`.
+Each particle is defined in its own Cartesian coordinate system, before placement
+and rotation in the simulation. Sphere centers must be finite and radii strictly
+positive. Coordinates declare mm, cm, m or unassigned legacy units. The simulation
+uses the same unit; legacy files take the run unit without rescaling. Geometry,
+center of mass (COM) and domain compatibility are checked. Spheres within one
+particle may overlap. Automatic COM uses sphere volumes as weights at uniform
+density and is available only for non-overlapping manual spheres. Overlapping
+manual geometry requires `center explicit x y z`.
 
 ## File format
 
-Files are ordered whitespace-delimited records in classic locale. The complete
-minimal example below illustrates an overlapping manual definition (unassigned legacy units):
+Write fields in the order shown below, separate values with whitespace and use
+a decimal point for numbers. This complete example defines two overlapping
+spheres with an explicit center of mass (unassigned legacy units):
 
 ```text
 SDBD_MULTISPHERE 1
@@ -24,13 +26,14 @@ spheres 2
 ```
 
 `scale` is a positive factor applied to coordinates, radii and COM while loading.
-Canonical saves write `scale 1` and represented values at `max_digits10` precision.
+Saved files write `scale 1` with the scale already applied, using enough decimal
+digits to recover the stored long-double values.
 The `units` record can be `legacy`, `mm`, `cm` or `m`; this label is preserved
 through transformations and I/O and does not itself convert coordinates.
 `center auto` selects the disjoint-sphere approximation. Exactly the declared
-number of x/y/z/r rows must follow `spheres`; trailing data is rejected. Unknown
+number of `x y z radius` rows must follow `spheres`; trailing data is rejected. Unknown
 versions, malformed/nonfinite numbers, invalid radii and excess counts fail
-explicitly. Comments are not part of this particle-file grammar.
+explicitly. Particle files do not accept comments.
 
 Version 2 inserts these records before `spheres`, in this order:
 

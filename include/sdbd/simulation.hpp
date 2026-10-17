@@ -1,42 +1,42 @@
 #pragma once
 #include "sdbd/particle.hpp"
 namespace sdbd {
-// Finite search-grid dimensions/spacings in legacy length units; deposition plane is z=0 and
-// horizontal origins must be zero.
+// Search grid: nx,ny,nz cells with spacings dx,dy,dz in simulation length units.
+// The deposition plane is z=0; horizontal grid origins must be zero.
 struct GridSettings {
     int nx{6},ny{6},nz{64};
     long double dx{120},dy{120},dz{120},xo{0},yo{0},zo{-1000};
 };
-// Initial horizontal COM sampling: full periodic cell or centered disk of radius min(Lx,Ly)/4.
+// Initial horizontal placement: the original full-cell rule, or a physical COM
+// sampled uniformly in a centered disk of radius min(Lx,Ly)/4.
 enum class InjectionMode { uniform, circle };
-// Runtime deposition parameters; preserve GSL stream selection, double-parsed phi and
-// immutable-deposition model.
+// Settings for one run. Particles settle in sequence; accepted particles stay fixed.
 struct SimulationSettings {
     GridSettings grid;
-    double phi{0.01}; // Parse as double, then widen, matching the original input.
+    double phi{0.01}; // Small rotation step in radians for frustrated contacts; original double precision.
     int seed{84328},resolution{1},shape{0},count{24};
     bool redrop{false};
-    std::string rng; // Empty retains environment-based selection for API compatibility.
-    std::function<void(int,int)> progress; // Completed particles, total; no RNG draws.
+    std::string rng; // Empty selects the GSL environment setting or default generator.
+    std::function<void(int,int)> progress; // Called with completed and total particle counts.
     long double particle_scale{1}; // Built-in nominal dimensions relative to the original shape.
     long double height_limit{}; // Positive maximum accepted surface z; zero retains legacy bounds.
     InjectionMode injection{InjectionMode::uniform}; // Initial horizontal placement, including retries.
 
 };
-// Requested outputs; empty paths disable individual files. record appends final
-// state to an existing configuration, without affecting numerical routines.
+// Output paths; an empty path disables that file. The record path names an
+// existing configuration to which final state and summary comments are appended.
 struct SimulationFiles {
     std::filesystem::path positions,height,details,particles,vtk,stl_poses;
-    std::filesystem::path record; // Optional existing run.conf to append final COM/retry/summary comments.
+    std::filesystem::path record; // Run configuration receiving final COMs and retry counts.
 };
-// Return a validated GSL RNG name from requested or environment/default, without allocating or
-// drawing; throw for unknown types.
+// Resolve a GSL generator name from requested, the environment or the default.
+// Reject unknown names without creating a generator or consuming random numbers.
 std::string resolve_rng_name(std::string requested = {});
-// Validate settings and optional geometry/domain compatibility without RNG draws, deposition or
-// output writes; throw on invalid input.
+// Check settings and whether the optional particle fits the domain; throw on
+// invalid input. This does not run deposition, draw random numbers or write files.
 void validate_simulation(const SimulationSettings&,const std::optional<ParticleGeometry>& = std::nullopt);
-// Deposit sequentially with supplied settings/geometry and files, or seven legacy arguments
-// plus working-directory input; return zero or throw on failure.
+// Run sequential deposition and write the requested files. Use the supplied
+// geometry or the selected built-in shape; return zero or throw on failure.
 int simulate(const SimulationSettings&,const SimulationFiles&,
              const std::optional<ParticleGeometry>& = std::nullopt);
 // Read seven legacy arguments and working-directory input, then deposit and write original

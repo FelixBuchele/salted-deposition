@@ -1,79 +1,175 @@
 <div align="center">
-<h1><img src="docs/salted_logo.png" alt="SALTED — Simulation of Granular Packings via Sequential Particle Deposition" width="800"></h1>
-<img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-blue">
-<a href="LICENSE"><img alt="SALTED source: MIT" src="https://img.shields.io/badge/source-MIT-blue"></a>
+  <img src="docs/salted_logo.png" alt="SALTED — Simulation of Granular Packings via Sequential Particle Deposition" width="800">
+  <p><strong>Generate and explore 3D packings of complex-shaped particles.</strong></p>
 </div>
 
----
+## What is SALTED?
 
-SALTED constructs static deposits of rigid multisphere particles by sequential
-steepest-descent ballistic deposition [1]. Each body settles through gravity-driven
-contact and rotation events before becoming fixed. The substrate is z=0 and
-horizontal boundaries are periodic; this is geometrical deposition rather than
-time-resolved force-based DEM.
+SALTED creates static particle packings by depositing rigid particles one at a
+time. Choose the particle geometry, particle count, simulation dimensions and
+random seed. SALTED calculates the deposited arrangement and exports it for
+inspection in ParaView or analysis with other tools.
+
+Custom shapes can be defined as set of (overlapping) spheres or generated from STL meshes
+using the included [GEMSS](https://github.com/aqa-arash/GEMSS) library [2,3]. A command-line program runs the simulations;
+an optional Python interface supports repeated runs and parameter studies.
 
 <p align="center">
-<img src="docs/meshes_03.png" alt="Steepest-descent deposition of 150 cow2 particles, rendered using their original STL surfaces" width="720">
+  <img src="docs/meshes_03.png" alt="Example packing of 150 cow-shaped particles" width="720">
 </p>
 
-*Figure 1. Steepest-descent deposit of 150 cow2 particles, rendered using original
-STL instances. Each particle uses 2,189 spheres for collision calculations.
-Cow model: Viewpoint Animation Engineering, Sun Microsystems;
-[Princeton Suggestive Contour Gallery](https://gfx.cs.princeton.edu/proj/sugcon/models/).
-The source mesh is not distributed with SALTED and retains its creators' rights.*
+*Example: a packing of 150 cow-shaped particles, displayed using their original STL surfaces.*
 
-## Features
+## Key features
 
-- Built-in sphere, spiky, original surface-lattice cube and overlapping-sphere stick.
-- Manual particle files with explicit physical centers of mass (COM).
-- Bundled, optional GEMSS generation from binary STL [2,3]. Physical COM, volume
-  and inertia come from the target voxel geometry (`compute_physics=2`),
-  independently of overlapping collision spheres.
-- Runtime configuration, reproducible seeds, replay metadata and optional Python.
-- Compact VTK collision geometry and original-STL instances for ParaView.
+- **Use custom particle shapes.** Load multisphere particles or generate them from binary STL meshes with GEMSS.
+- **Control deposition.** Set particle dimensions, particle count, simulation size and random seed in a configuration file.
+- **Inspect the packing.** Export the multisphere particles or display the deposited particles using their original STL surfaces.
+- **Automate studies.** Reuse multisphere particles and vary simulation settings through the executable or Python.
 
-## Build, run and view
+## Quick start
 
-Requirements: Linux/glibc, C++20 compiler, CMake ≥3.20, GSL ≥2.0 development
-files and a build tool. From the repository root:
+### Build SALTED
 
-```sh
+Requirements: Linux with glibc, a C++20 compiler, CMake ≥3.20 and the GNU
+Scientific Library (GSL) ≥2.0. On Ubuntu or Debian:
+
+```bash
+sudo apt install build-essential cmake libgsl-dev
+```
+
+From the SALTED folder containing `CMakeLists.txt`:
+
+```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
+```
+
+To also generate particles from STL, install Eigen ≥3.4 (`sudo apt install
+libeigen3-dev` on Ubuntu or Debian). Use this configuration command in place of
+the first CMake command above, then compile with the same build command:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSDBD_ENABLE_GEMSS=ON
+```
+
+The executable is `build/deposit`. Compile once and reuse it for different runs.
+All commands and Python examples below assume the SALTED folder as the current directory.
+
+### Run an example
+
+The included cube example deposits 12 particles:
+
+```bash
 build/deposit run examples/cube/config.conf
 ```
 
-The run writes **`results/cube/deposition.vtk`** for visualization and **`run.conf`**
-with effective settings and provenance. See [output and visualization](#output-and-visualization)
-for the exported geometry and its use in tools such as ParaView.
+Its configuration selects `results/cube/` as the output folder. This contains
+`deposition.vtk`, describing the final sphere geometry, and `run.conf`, recording
+the simulation settings and completed run. Open the VTK file in ParaView and use
+sphere glyphs to display the packing; see the [visualization guide](docs/exports.md).
 
-The default build needs neither Python nor Eigen and runs the prepared rock.
-Existing output destinations are refused. Repeat with a fresh destination:
+SALTED protects previous results by refusing to overwrite an existing output
+folder. Choose another folder to repeat the example:
 
-```sh
-build/deposit run examples/cube/config.conf --output results/cube-repeat
+```bash
+build/deposit run examples/cube/config.conf --output results/cube-second-run
 ```
 
-## Configuration
+## Configure your own simulation
 
-Examples use `key = value` files. Edit `count`, `seed`, `particle` and
-`box = Lx Ly height`; lengths use the declared `units`. The top is open: height
-limits the accepted surface height rather than adding a lid.
+Settings use plain-text `key = value` files. For example, save this as
+`simulation.conf` in the SALTED folder:
 
-```sh
-build/deposit validate --config examples/cube/config.conf
-build/deposit run --help
+```ini
+particle = cube
+size = 180
+resolution = 3
+count = 12
+box = 1440 1440 1440
+units = mm
+seed = 84328
+rng = mt19937
+output = results/my-simulation
 ```
 
-Validation writes nothing and does not simulate or reconstruct. Precedence is
-**defaults < config < --overrides FILE < --output**. Config paths are file-relative;
-`--output` is cwd-relative. See the [configuration reference](docs/configuration.md)
-and `--help`, `--version`, `--print-example` for command discovery.
+| Setting | Meaning |
+|---|---|
+| `particle` | Built-in shape name or path to a custom particle file. |
+| `size`, `resolution` | Dimensions and sphere discretization of built-in shapes. Here, a nominal 180 mm cube uses 26 surface spheres. |
+| `count` | Number of complete particles to deposit. |
+| `box`, `units` | Horizontal x/y lengths and maximum packing height, in the declared length unit. |
+| `seed`, `rng` | Random seed and generator; reuse both for reproducible runs with the same settings. |
+| `output` | Folder for simulation results. |
+
+Check the inputs, then run:
+
+```bash
+build/deposit validate --config simulation.conf
+build/deposit run simulation.conf
+```
+
+The floor is at z = 0. Horizontal boundaries are periodic and the top is open;
+a run fails if a deposited particle exceeds the specified height. Paths inside
+configuration files are relative to those files. See the
+[configuration reference](docs/configuration.md) for advanced controls.
+
+## Use your own particle geometry
+
+A multisphere particle is a rigid group of spheres, which may overlap internally.
+Supply sphere centers, radii and a physical center of mass using the
+[particle file format](docs/particles.md), then select that file with `particle`.
+
+For STL input, enable GEMSS during compilation as described above. The included
+[rock generation configuration](examples/rock/generation.conf) selects the mesh
+and reconstruction settings. Its main fields are:
+
+```ini
+stl = example_mesh.stl
+units = mm
+maximum_spheres = 50
+accuracy = 0.9
+```
+
+To use another mesh, copy that configuration and change `stl` and `units` to match
+your model. Sphere count and reconstruction accuracy control the approximation;
+the remaining generation settings are documented in the configuration reference.
+
+Generate the included rock with:
+
+```bash
+build/deposit generate examples/rock/generation.conf
+```
+
+This writes `results/rock-regenerated.particle`. Reuse it by saving the following
+as `rock-study.conf` in the SALTED folder:
+
+```ini
+particle = results/rock-regenerated.particle
+count = 24
+box = 60 60 60
+units = mm
+seed = 84328
+rng = mt19937
+output = results/rock-study
+```
+
+```bash
+build/deposit run rock-study.conf
+```
+
+GEMSS calculates physical volume, center of mass and inertia from the original
+STL target geometry. These properties remain separate from the spheres used for
+contact calculations; overlapping sphere volumes are not summed to define mass.
+The calculation assumes uniform density and approximates the target on a voxel grid.
 
 ## Python interface (optional)
 
-Python ≥3.10; no runtime packages. Install with `python3 -m pip install ./python`
-(editable: `python3 -m pip install -e ./python`). Build C++ separately:
+After building SALTED, install the wrapper with Python ≥3.10:
+
+```bash
+python3 -m pip install ./python
+```
 
 ```python
 from salted_deposition import Simulator
@@ -84,126 +180,61 @@ result = sim.run("examples/cube/config.conf", output="results/python-cube",
 print(result.vtk_path)
 ```
 
-The API exposes `Simulator`, `run()`, `generate_particle()` and immutable
-`SimulationResult`. Common overrides are `count`, `seed`, `shape` or `particle`,
-and `export_stl_poses`; None retains config values. VTK is automatic. Advanced
-settings remain in configs. See [API details](docs/configuration.md#python-api).
+`run()` accepts a configuration and optional overrides for common settings.
+With GEMSS enabled, `generate_particle()` creates reusable particles from STL.
+All geometry processing and numerical calculations remain in C++. See the
+[Python API reference](docs/configuration.md#python-api) for arguments and path behavior.
 
-## STL generation and reuse
+## Results and visualization
 
-For reconstruction, provide Eigen ≥3.4 and enable the bundled GEMSS backend:
-
-```sh
-cmake -S . -B build-gemss -DCMAKE_BUILD_TYPE=Release -DSDBD_ENABLE_GEMSS=ON
-cmake --build build-gemss --parallel 2
-build-gemss/deposit generate examples/rock/generation.conf
-printf 'particle = rock-regenerated.particle\n' > results/rock-input.conf
-build/deposit run examples/rock/config.conf --overrides results/rock-input.conf --output results/rock-regenerated
-```
-
-The overlay selects the generated file relative to `results/rock-input.conf`.
-Normal rock runs reuse the included `rock.particle`. CMake finds installed Eigen;
-`SDBD_EIGEN_INCLUDE_DIRECTORY` may instead name a local header root containing
-`Eigen/Core`. Builds never download dependencies. Python generation and reuse:
-
-```python
-from salted_deposition import Simulator
-
-sim = Simulator("build-gemss/deposit")
-particle = sim.generate_particle("examples/rock/example_mesh.stl",
-                                 output="results/python-rock.particle",
-                                 config="examples/rock/generation.conf")
-for seed in (84328, 84329):
-    result = sim.run("examples/rock/config.conf", particle=particle,
-                     output=f"results/python-rock-{seed}", count=6, seed=seed,
-                     export_stl_poses=True)
-    print(result.vtk_path, result.stl_poses_path)
-```
-
-STL units must be declared. [Particle formats](docs/particles.md) cover manual
-input; [rock notes](examples/rock/README.md) give the Dice **0.9** generation settings.
-
-## Examples
-
-| Example | Purpose | Command after `build/deposit` |
-|---|---|---|
-| [Cube](examples/cube/README.md) | 12 bodies; original 26-sphere surface lattice | `run examples/cube/config.conf` |
-| [Stick](examples/stick/README.md) | 12 bodies; seven overlapping spheres each | `run examples/stick/config.conf` |
-| [Rock](examples/rock/README.md) | 24 bodies; reusable STL geometry and surface poses | `run examples/rock/config.conf` |
-
-These are small demonstrations, not large pile showcases. They pin GSL mt19937
-and seeds. Notes give dimensions and expected files. The rock mesh belongs to
-Felix Buchele and is included under MIT; no large outputs are distributed.
-
-## Output and visualization
-
-| File | Contents |
+| File | Contents and use |
 |---|---|
-| `run.conf` | Replay settings, source geometry and units, status, final physical COMs and redrop counts |
-| `deposition.vtk` | Final world-space sphere centers, `radius`, `particle_id` and local `sphere_id` |
-| `stl_poses.vtk` | STL-derived bodies: transformed original mesh origins, `particle_id`, WXYZ `orientation` quaternions and uniform `scale` |
+| `deposition.vtk` | Final sphere centers, radii and particle identifiers. Display these spheres to inspect the geometry used for contact calculations. Written for every run. |
+| `stl_poses.vtk` | Mesh placement points, orientation quaternions and scale factors. Combine with the unchanged original STL to display the deposited particle surfaces. Written when the particle retains its STL reference and coordinate frame. |
+| `run.conf` | Simulation settings, random seed, software version, completion status and final particle centers of mass. Use it to document or repeat the calculation. |
 
-Both VTK files are ASCII PolyData. `deposition.vtk` stores one point per constituent
-sphere, rather than triangulated sphere surfaces. Visualization tools can render
-spheres at these points using their radii to reconstruct the collision geometry.
-Constituents sharing a `particle_id` belong to the same rigid body; `sphere_id`
-identifies each constituent within it. This view supports inspection of packing
-structure and contacts, with particles colored by identity.
+The STL pose points locate the transformed mesh origins; physical centers of mass
+are recorded separately in `run.conf`. The original STL is reused for all particles,
+without storing a mesh copy for each one. Color the packing by `particle_id` to
+distinguish particles. The [export guide](docs/exports.md) contains details on the export formats.
 
-`stl_poses.vtk` stores one point per deposited body and requires the **unchanged
-original STL** referenced in `run.conf`. Each point is the transformed mesh origin,
-**not the physical COM**. Its normalized, right-handed WXYZ quaternion and scale
-allow a tool such as ParaView to scale, rotate and place instances of that mesh,
-reconstructing the final surface assembly without duplicating mesh data in the
-export. Coordinates use the simulation's declared length unit; `scale` converts
-original STL coordinates to that unit, including any specified enlargement.
-The surface view shows particle shapes and orientations; the sphere view shows
-the geometry actually used for collision calculations. Approximation differences
-can therefore produce visible STL intersections despite separated collision spheres.
+The sphere view shows the collision geometry. The STL view shows the original
+surfaces, which may differ where the sphere approximation fails to capture shape features.
 
-`stl_poses = false` disables poses; `legacy_output = true` adds original numerical
-text files. Replay with
-`build/deposit run results/cube/run.conf --output results/cube-replay`.
-[Export conventions](docs/exports.md) give coordinate transforms, precision and
-optional ParaView setup instructions.
+## Deposition method and limitations
 
-## Limitations
+SALTED implements steepest-descent ballistic deposition [1]. Each particle falls
+under gravity and rotates around its supports along the allowed path of steepest
+decrease in gravitational potential energy. The calculation advances directly to
+the next contact or stopping event. Once settled, a particle
+remains fixed while the next one is deposited.
 
-One geometry is repeated per run. Horizontal box lengths must be positive integers
-in the declared unit. Absolute tolerances and original stopping rules remain:
-scale changes can change trajectories, some shapes/seeds stall, and redrop does
-not guarantee termination. Exact comparisons depend on long-double precision and
-compiler/libm. Windows/macOS are not currently supported.
+The model neglects inertia, bouncing and rearrangement of deposited particles.
+Each run repeats one particle shape. Horizontal box lengths must be positive
+integers in the declared unit. Sphere approximations can omit fine mesh features;
+some shapes or seeds can stall during settling, and redropping does not guarantee completion.
 
-Voxelization can omit features; mesh checks do not certify absence of
-self-intersections. STL surfaces can intersect where collision spheres omit
-geometry. Periodic wrapping and legacy contact corrections can make rigid poses
-differ slightly from individual sphere positions. ParaView arithmetic has lower
-precision than the solver. See [export limitations](docs/exports.md#source-provenance-and-limitations).
+## Included examples
 
-## License, authors and references
+- [Cube](examples/cube/README.md): the original surface-sphere representation for comparison with the original implementation.
+- [Stick](examples/stick/README.md): an elongated particle built from overlapping spheres.
+- [Rock](examples/rock/README.md): an STL mesh and its already generated 19-sphere particle definition; run it without repeating geometry generation.
 
-SALTED source retains the [MIT license](LICENSE), under maintainer-confirmed
-original-source permission. Original code: **Nikola Topic** (2015); methodology:
-**Nikola Topic and Thorsten Pöschel** [1]; modernization: **Felix Buchele**.
-Original vector code credits **Thomas Schwager**. GEMSS author **Arash Moradian**
-and contributors **Felix Buchele, Patric Müller and Thorsten Pöschel** retain
-multisphere-generation attribution.
+## Authors, references and license
 
-GSL is GPL-3.0-or-later. Bundled GEMSS is pinned to
-`dc0f6de101b04545aa9679a13e692f60dfae2689`; MIT does not replace its component
-MPL/LGPL/MIT/zlib notices. Eigen remains external. Read
-[bundled notices](vendor/GEMSS/NOTICE.md) and [distribution terms](docs/licenses.md).
-Linked binaries are not MIT-only and require applicable GPL/LGPL/MPL compliance.
-This source distribution includes example geometry, not compiled executables.
+Original implementation: **Nikola Topic**. Deposition methodology: **Nikola Topic
+and Thorsten Pöschel**. Modernized implementation: **Felix Buchele**. Original
+vector routines: **Thomas Schwager**. GEMSS generation: **Arash Moradian,
+Felix Buchele, Patric Müller, Thorsten Pöschel**, and contributors.
 
-1. N. Topic and T. Pöschel. *Steepest descent ballistic deposition of complex
-   shaped particles*. Journal of Computational Physics **308**, 421–437 (2016).
-   [DOI](https://doi.org/10.1016/j.jcp.2015.12.052).
-2. A. Moradian, F. Buchele and T. Pöschel. *GEMSS: A C++ Library for Multi-Sphere
-   Modeling in DEM Simulations*. arXiv:2608.15463 (2026).
-   [Verified preprint](https://arxiv.org/abs/2608.15463). See also the
-   [GEMSS repository citation](https://github.com/aqa-arash/GEMSS#citation).
-3. F. Buchele, T. Pöschel and P. Müller. *Multi-sphere shape generator for DEM
-   simulations of complex-shaped particles*. Powder Technology **480**, 122635
-   (2026). [DOI](https://doi.org/10.1016/j.powtec.2026.122635).
+1. N. Topic and T. Pöschel. *Steepest descent ballistic deposition of complex shaped particles*. Journal of Computational Physics **308**, 421–437 (2016). [DOI](https://doi.org/10.1016/j.jcp.2015.12.052).
+2. A. Moradian, F. Buchele, P. Müller and T. Pöschel. *GEMSS: A C++ library for multi-sphere modeling in DEM simulations*. Powder Technology **486**, 123162 (2027). [DOI](https://doi.org/10.1016/j.powtec.2026.123162).
+3. F. Buchele, T. Pöschel and P. Müller. *Multi-sphere shape generator for DEM simulations of complex-shaped particles*. Powder Technology **480**, 122635 (2026). [DOI](https://doi.org/10.1016/j.powtec.2026.122635).
+
+SALTED source and the included rock geometry are distributed under [MIT](LICENSE).
+Dependencies retain their own terms; GSL-linked executables require GPL compliance.
+See [third-party licenses](docs/licenses.md).
+
+The illustration uses *cow2* by Viewpoint Animation Engineering, Sun Microsystems,
+from the [Princeton Suggestive Contour Gallery](https://gfx.cs.princeton.edu/proj/sugcon/models/).
+The cow mesh is not distributed with SALTED and retains its creators' rights.

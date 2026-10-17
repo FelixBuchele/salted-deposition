@@ -10,7 +10,8 @@
 
 namespace sdbd {
 namespace {
-// Return a classic-locale checked output stream preserving long-double text digits.
+// Open an output file with decimal-point formatting and enough digits to recover
+// long-double values. File errors throw exceptions.
 std::ofstream output(const std::filesystem::path& path) {
     std::ofstream out;out.exceptions(std::ios::failbit|std::ios::badbit);
     try { out.open(path); }
@@ -24,7 +25,8 @@ void finite(Vec3 p) {
     if (!std::isfinite(p.x()) || !std::isfinite(p.y()) || !std::isfinite(p.z()))
         throw std::invalid_argument("Nonfinite export coordinate");
 }
-// Write the legacy PolyData preamble; VTK double is the portable reader type.
+// Write the legacy VTK header and point count. Declare double for reader
+// compatibility, while writing all available long-double decimal digits.
 void header(std::ostream& out,std::size_t count,const char* title) {
     out<<"# vtk DataFile Version 3.0\n"<<title<<"\nASCII\nDATASET POLYDATA\nPOINTS "<<count<<" double\n";
 }
@@ -86,8 +88,8 @@ void write_stl_poses(const std::filesystem::path& path,std::span<const Vec3> cen
     vertices(out,centers.size());
     out<<"FIELD PointAttributes 3\nparticle_id 1 "<<centers.size()<<" int\n";
     for (std::size_t i=0;i<centers.size();++i) out<<i<<'\n';
-    // FIELD preserves all arrays even with a reader's ReadAllScalars disabled.
-    // VECTORS cannot represent a quaternion: that record has exactly 3 components.
+    // Store orientation as a four-component FIELD array in (w,x,y,z) order.
+    // VTK VECTORS has only three components and cannot hold a quaternion.
     out<<"orientation 4 "<<centers.size()<<" double\n";
     for (const auto& rotation:orientations) { const auto q=rotation.normalized();out<<q.w<<' '<<q.x<<' '<<q.y<<' '<<q.z<<'\n'; }
     out<<"scale 1 "<<centers.size()<<" double\n";
